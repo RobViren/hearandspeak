@@ -1,0 +1,25 @@
+[package]
+name = "hearandspeak"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "CPU streaming speech recognition (Parakeet TDT) and text to speech (Kokoro), pure Rust, AVX2"
+
+[features]
+default = ["asr", "tts", "download"]
+asr = []
+tts = ["dep:fancy-regex"]
+download = ["dep:ureq"]
+
+[dependencies]
+fancy-regex = { version = "0.14", optional = true }
+ureq = { version = "3", optional = true }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "unwind"
+
+[profile.bench]
+inherits = "release"
+debug = 1

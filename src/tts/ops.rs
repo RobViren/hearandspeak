@@ -236,26 +236,61 @@ unsafe fn conv_range(
                 let wb = w.add(cb * cin * k * KM);
                 let mut t = tt;
                 while t < te {
-                    let mut a = [[zero(); NV]; KM];
-                    for (r, ar) in a.iter_mut().enumerate() {
-                        *ar = [set(*bias.add(cb * KM + r)); NV];
-                    }
-                    let mut wp = wb;
-                    for ci in 0..cin {
-                        let xr = x.add(ci * xs + t).sub(pad);
-                        for kk in 0..k {
-                            let xp = xr.add(kk * dil);
-                            let xv = [ld(xp), ld(xp.add(8)), ld(xp.add(16))];
-                            for (r, ar) in a.iter_mut().enumerate() {
-                                let wv = set(*wp.add(r));
-                                for v in 0..NV {
-                                    ar[v] = fma(wv, xv[v], ar[v]);
-                                }
-                            }
-                            wp = wp.add(KM);
-                        }
-                    }
-                    for (r, ar) in a.iter().enumerate() {
+                    let b = |r: usize| set(*bias.add(cb * KM + r));
+                    let (mut a00, mut a01, mut a02) = (b(0), b(0), b(0));
+                    let (mut a10, mut a11, mut a12) = (b(1), b(1), b(1));
+                    let (mut a20, mut a21, mut a22) = (b(2), b(2), b(2));
+                    let (mut a30, mut a31, mut a32) = (b(3), b(3), b(3));
+                    // LLVM's scheduler hoists the weight broadcasts and spills accumulators here (kokoallovero
+                    // turns clang's scheduler off for the same reason), so the (ci, k) loops are written out.
+                    std::arch::asm!(
+                        "2:",
+                        "mov {xr}, {xrow}",
+                        "mov {kk}, {k}",
+                        "3:",
+                        "vmovups ymm12, [{xr}]",
+                        "vmovups ymm13, [{xr} + 32]",
+                        "vmovups ymm14, [{xr} + 64]",
+                        "vbroadcastss ymm15, dword ptr [{wp}]",
+                        "vfmadd231ps ymm0, ymm15, ymm12",
+                        "vfmadd231ps ymm1, ymm15, ymm13",
+                        "vfmadd231ps ymm2, ymm15, ymm14",
+                        "vbroadcastss ymm15, dword ptr [{wp} + 4]",
+                        "vfmadd231ps ymm3, ymm15, ymm12",
+                        "vfmadd231ps ymm4, ymm15, ymm13",
+                        "vfmadd231ps ymm5, ymm15, ymm14",
+                        "vbroadcastss ymm15, dword ptr [{wp} + 8]",
+                        "vfmadd231ps ymm6, ymm15, ymm12",
+                        "vfmadd231ps ymm7, ymm15, ymm13",
+                        "vfmadd231ps ymm8, ymm15, ymm14",
+                        "vbroadcastss ymm15, dword ptr [{wp} + 12]",
+                        "vfmadd231ps ymm9, ymm15, ymm12",
+                        "vfmadd231ps ymm10, ymm15, ymm13",
+                        "vfmadd231ps ymm11, ymm15, ymm14",
+                        "add {wp}, 16",
+                        "add {xr}, {dil}",
+                        "dec {kk}",
+                        "jnz 3b",
+                        "add {xrow}, {xs}",
+                        "dec {ci}",
+                        "jnz 2b",
+                        xrow = inout(reg) x.add(t).sub(pad) => _,
+                        wp = inout(reg) wb => _,
+                        ci = inout(reg) cin => _,
+                        xr = out(reg) _,
+                        kk = out(reg) _,
+                        k = in(reg) k,
+                        dil = in(reg) dil * 4,
+                        xs = in(reg) xs * 4,
+                        inout("ymm0") a00, inout("ymm1") a01, inout("ymm2") a02,
+                        inout("ymm3") a10, inout("ymm4") a11, inout("ymm5") a12,
+                        inout("ymm6") a20, inout("ymm7") a21, inout("ymm8") a22,
+                        inout("ymm9") a30, inout("ymm10") a31, inout("ymm11") a32,
+                        out("ymm12") _, out("ymm13") _, out("ymm14") _, out("ymm15") _,
+                        options(nostack),
+                    );
+                    let out = [[a00, a01, a02], [a10, a11, a12], [a20, a21, a22], [a30, a31, a32]];
+                    for (r, ar) in out.iter().enumerate() {
                         let yr = y.add((cb * KM + r) * ys + t);
                         for (v, av) in ar.iter().enumerate() {
                             st(yr.add(v * 8), *av);
@@ -594,57 +629,61 @@ pub fn conv_snake(
         (0..pool.n).map(|_| std::sync::Mutex::new(vec![0.0; 2 * cout])).collect();
     let (xb, xs, xt) = (P(x.row(0) as *mut f32), x.stride, x.t);
     let (yb, ys) = (y.base(), y.stride);
+    thread_local!(static SCRATCH: std::cell::RefCell<[Vec<f32>; 5]> = Default::default());
     pool.run(|i| unsafe {
-        let mut s = Buf::<f32>::new(c.cin * ss);
-        let mut z = Buf::<f32>::new(dd * zlen + 16);
-        let mut v = Buf::<f32>::new(aa * vs);
-        let mut mm = Buf::<f32>::new(aa * ms);
-        let mut o = Buf::<f32>::new(cout * os);
-        let mut part = parts[i].lock().unwrap();
-        let (sum, sq) = part.split_at_mut(cout);
-        for j in tiles * i / pool.n..tiles * (i + 1) / pool.n {
-            let tt = j * l;
-            let te = (tt + l).min(tp);
-            let (lo, hi) = (tt as isize - pad as isize, (te + pad) as isize);
-            snake_tile(xb.ptr(), xs, a, b, alpha, s.as_mut_ptr(), ss, c.cin, lo, hi, xt as isize);
-            for ci in 0..c.cin {
-                s[ci * ss + (hi - lo) as usize..(ci + 1) * ss].fill(0.0);
+        SCRATCH.with_borrow_mut(|bufs| {
+            for (b, n) in bufs.iter_mut().zip([c.cin * ss, dd * zlen + 16, aa * vs, aa * ms, cout * os]) {
+                if b.len() < n {
+                    b.resize(n, 0.0);
+                }
             }
-            wino_switch!(
-                wino_input,
-                aa,
-                s.as_ptr(),
-                ss,
-                c.cin,
-                &c.bt,
-                m,
-                d,
-                n,
-                z.as_mut_ptr(),
-                v.as_mut_ptr(),
-                vs,
-                cols
-            );
-            for xi in 0..aa {
-                conv_range(
-                    v.as_ptr().add(xi * vs),
-                    cols,
-                    c.u[xi].w.as_ptr(),
-                    zero_b.as_ptr(),
-                    mm.as_mut_ptr().add(xi * ms),
-                    cols,
+            let [s, z, v, mm, o] = bufs;
+            let mut part = parts[i].lock().unwrap();
+            let (sum, sq) = part.split_at_mut(cout);
+            for j in tiles * i / pool.n..tiles * (i + 1) / pool.n {
+                let tt = j * l;
+                let te = (tt + l).min(tp);
+                let (lo, hi) = (tt as isize - pad as isize, (te + pad) as isize);
+                snake_tile(xb.ptr(), xs, a, b, alpha, s.as_mut_ptr(), ss, c.cin, lo, hi, xt as isize);
+                for ci in 0..c.cin {
+                    s[ci * ss + (hi - lo) as usize..(ci + 1) * ss].fill(0.0);
+                }
+                wino_switch!(
+                    wino_input,
+                    aa,
+                    s.as_ptr(),
+                    ss,
                     c.cin,
-                    cout,
-                    1,
-                    1,
-                    0,
-                    cols,
-                    cols,
+                    &c.bt,
+                    m,
+                    d,
+                    n,
+                    z.as_mut_ptr(),
+                    v.as_mut_ptr(),
+                    vs,
+                    cols
                 );
+                for xi in 0..aa {
+                    conv_range(
+                        v.as_ptr().add(xi * vs),
+                        cols,
+                        c.u[xi].w.as_ptr(),
+                        zero_b.as_ptr(),
+                        mm.as_mut_ptr().add(xi * ms),
+                        cols,
+                        c.cin,
+                        cout,
+                        1,
+                        1,
+                        0,
+                        cols,
+                        cols,
+                    );
+                }
+                wino_switch!(wino_output, aa, mm.as_ptr(), ms, cols, c.cout, &c.at, m, d, n, &c.b, o.as_mut_ptr(), os);
+                conv_epilogue(o.as_ptr(), os, yb.ptr(), ys, c.cout, tt, te, xt, residual, sum, sq);
             }
-            wino_switch!(wino_output, aa, mm.as_ptr(), ms, cols, c.cout, &c.at, m, d, n, &c.b, o.as_mut_ptr(), os);
-            conv_epilogue(o.as_ptr(), os, yb.ptr(), ys, c.cout, tt, te, xt, residual, sum, sq);
-        }
+        });
     });
     let mut sum = vec![0f64; c.cout];
     let mut sq = vec![0f64; c.cout];

@@ -905,7 +905,16 @@ fn text_encoder(pool: &Pool, m: &Model, ids: &[usize]) -> Act {
     x
 }
 
+thread_local!(static LAP: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) });
+
 fn dump(name: &str, v: &[f32]) {
+    if std::env::var_os("HS_TRACE").is_some() {
+        let now = std::time::Instant::now();
+        if let Some(t) = LAP.get() {
+            eprintln!("{name:14} {:8.1}", (now - t).as_secs_f64() * 1e3);
+        }
+        LAP.set(Some(now));
+    }
     if let Some(d) = std::env::var_os("HS_DUMP") {
         let b: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
         std::fs::write(std::path::Path::new(&d).join(format!("{name}.f32")), b).unwrap();
@@ -913,6 +922,9 @@ fn dump(name: &str, v: &[f32]) {
 }
 
 fn dump_act(name: &str, a: &Act) {
+    if std::env::var_os("HS_DUMP").is_none() && std::env::var_os("HS_TRACE").is_none() {
+        return;
+    }
     let v: Vec<f32> = (0..a.c).flat_map(|c| a.r(c).iter().copied()).collect();
     dump(name, &v);
 }
@@ -921,6 +933,7 @@ fn dump_act(name: &str, a: &Act) {
 pub fn synthesize(m: &Model, pool: &Pool, ids: &[usize], style: &[f32], speed: f32, noise: &mut Noise) -> Vec<f32> {
     let (timbre, prosody) = (&style[..STYLE], &style[STYLE..]);
     let n = ids.len();
+    LAP.set(Some(std::time::Instant::now()));
     let b = bert(pool, m, ids);
     dump("bert", &b);
     let bert_enc = m.bert_encoder.run(pool, &b);

@@ -9,8 +9,7 @@ use std::time::Instant;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (mut threads, mut model, mut tok, mut chunk_ms, mut files) =
-        (0, None, None, 0usize, Vec::new());
+    let (mut threads, mut model, mut tok, mut chunk_ms, mut files) = (0, None, None, 0usize, Vec::new());
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -29,11 +28,7 @@ fn main() {
         _ => Asr::new(&Weights::asr(), pool.clone()),
     }
     .unwrap();
-    eprintln!(
-        "load\t{:.2}\tthreads {}",
-        t0.elapsed().as_secs_f64(),
-        pool.n
-    );
+    eprintln!("load\t{:.2}\tthreads {}", t0.elapsed().as_secs_f64(), pool.n);
     let (mut audio, mut busy) = (0.0, 0.0);
     for f in &files {
         let (pcm, rate) = wav::read(f);
@@ -57,8 +52,5 @@ fn main() {
         println!("{text}");
     }
     eprint!("{}", asr.timings());
-    eprintln!(
-        "total\t{busy:.2}\taudio {audio:.1}\trtf {:.4}",
-        busy / audio.max(1e-9)
-    );
+    eprintln!("total\t{busy:.2}\taudio {audio:.1}\trtf {:.4}", busy / audio.max(1e-9));
 }

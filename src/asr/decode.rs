@@ -29,11 +29,7 @@ impl Tokenizer {
                 special[id] = t.get("special").is_some_and(|s| s.bool());
             }
         }
-        for (tok, id) in j
-            .get("model")
-            .and_then(|m| m.get("vocab"))
-            .map_or(&[][..], |v| v.obj())
-        {
+        for (tok, id) in j.get("model").and_then(|m| m.get("vocab")).map_or(&[][..], |v| v.obj()) {
             let id = id.num() as usize;
             if id < VOCAB {
                 vocab[id] = tok.clone();
@@ -51,9 +47,7 @@ impl Tokenizer {
                 text.push_str(&self.vocab[t]);
             }
         }
-        text.replace('\u{2581}', " ")
-            .trim_matches([' ', '\n', '\t', '\r'])
-            .to_string()
+        text.replace('\u{2581}', " ").trim_matches([' ', '\n', '\t', '\r']).to_string()
     }
 }
 
@@ -62,7 +56,9 @@ impl Model {
         let d = ENCODED;
         let mut inp = [0f32; 2 * ENCODED];
         let mut gates = [0f32; 4 * ENCODED];
-        let all = Picks::new(&inp, false);
+        static ALL: std::sync::OnceLock<(Picks, Picks)> = std::sync::OnceLock::new();
+        let (all, one) =
+            ALL.get_or_init(|| (Picks::new(&[0.0; 2 * ENCODED], false), Picks::new(&[0.0; ENCODED], false)));
         for i in 0..2 {
             if i == 0 {
                 inp[..d].copy_from_slice(&self.embedding[token * d..(token + 1) * d]);
@@ -70,13 +66,7 @@ impl Model {
                 inp[..d].copy_from_slice(&h[..d]);
             }
             inp[d..].copy_from_slice(&h[i * d..(i + 1) * d]);
-            linear_half(
-                &self.pool,
-                &self.cell[i],
-                inp.as_ptr(),
-                &all,
-                gates.as_mut_ptr(),
-            );
+            linear_half(&self.pool, &self.cell[i], inp.as_ptr(), all, gates.as_mut_ptr());
             unsafe {
                 sigmoid(gates.as_mut_ptr(), 2 * d);
                 sigmoid(gates.as_mut_ptr().add(3 * d), d);
@@ -86,14 +76,7 @@ impl Model {
                 h[i * d + j] = gates[3 * d + j] * c[i * d + j].tanh();
             }
         }
-        let one = Picks::new(&inp[..d], false);
-        linear_half(
-            &self.pool,
-            &self.dec_proj,
-            h[d..].as_ptr(),
-            &one,
-            predicted.as_mut_ptr(),
-        );
+        linear_half(&self.pool, &self.dec_proj, h[d..].as_ptr(), one, predicted.as_mut_ptr());
     }
 
     /// (frame, token, duration) per joint evaluation, blanks included. The step budget is 10 per frame for the
@@ -113,13 +96,7 @@ impl Model {
             for i in 0..d {
                 inp[i] = (encoded[frame * d + i] + predicted[i]).max(0.0);
             }
-            linear_half(
-                &self.pool,
-                &self.joint,
-                inp.as_ptr(),
-                &Picks::new(&inp, true),
-                logits.as_mut_ptr(),
-            );
+            linear_half(&self.pool, &self.joint, inp.as_ptr(), &Picks::new(&inp, true), logits.as_mut_ptr());
             let token = unsafe { argmax(&logits[..VOCAB]) };
             let dl = &logits[VOCAB..VOCAB + DURATIONS];
             let mut duration = (0..DURATIONS).fold(0, |b, i| if dl[i] > dl[b] { i } else { b });
@@ -160,11 +137,7 @@ impl Model {
             }
             start = None;
         }
-        regions
-            .into_iter()
-            .filter(|(a, b)| b - a >= VAD_MIN_SPEECH)
-            .map(|(a, b)| (a, b.min(seconds)))
-            .collect()
+        regions.into_iter().filter(|(a, b)| b - a >= VAD_MIN_SPEECH).map(|(a, b)| (a, b.min(seconds))).collect()
     }
 
     /// The VAD blocks of a recording fall at fixed offsets once the audio past them is known, so segmenting can
@@ -189,11 +162,7 @@ impl Model {
             if !last && remaining < block_n + tail {
                 break;
             }
-            let block = if remaining <= block_n {
-                remaining
-            } else {
-                block_n.min(remaining - tail)
-            };
+            let block = if remaining <= block_n { remaining } else { block_n.min(remaining - tail) };
             if read + block > start {
                 let offset = (read - start) as f64 / sr;
                 for (a, b) in self.block_speech(&pcm[read as usize..(read + block) as usize]) {
@@ -205,8 +174,8 @@ impl Model {
             keep = read;
             read += block;
             while read - start > cap {
-                let cut = (next_cut(&pauses(regions.clone(), (read - start) as f64 / sr)) * sr)
-                    .round_ties_even() as isize;
+                let cut =
+                    (next_cut(&pauses(regions.clone(), (read - start) as f64 / sr)) * sr).round_ties_even() as isize;
                 let seconds = cut as f64 / sr;
                 if has_speech(&regions, seconds) {
                     out.push((start as usize, (start + cut) as usize));
@@ -220,9 +189,7 @@ impl Model {
             }
         }
         if last {
-            if read - start >= MIN_SAMPLES as isize
-                && has_speech(&regions, (read - start) as f64 / sr)
-            {
+            if read - start >= MIN_SAMPLES as isize && has_speech(&regions, (read - start) as f64 / sr) {
                 out.push((start as usize, read as usize));
             }
             start = read;
@@ -282,10 +249,7 @@ fn pauses(mut regions: Vec<(f64, f64)>, seconds: f64) -> Vec<(f64, f64)> {
 }
 
 fn next_cut(pauses: &[(f64, f64)]) -> f64 {
-    let mut pick = pauses
-        .iter()
-        .rev()
-        .find(|p| p.0 >= MIN_SEGMENT_SECONDS && p.1 <= SEGMENT_SECONDS);
+    let mut pick = pauses.iter().rev().find(|p| p.0 >= MIN_SEGMENT_SECONDS && p.1 <= SEGMENT_SECONDS);
     if pick.is_none() {
         pick = pauses.iter().rev().find(|p| {
             let mid = (p.0 + p.1) / 2.0;

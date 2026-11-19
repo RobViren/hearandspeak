@@ -124,11 +124,7 @@ fn load_linear(st: &SafeTensors, name: &str) -> io::Result<Int8W> {
         return Ok(w);
     }
     let s = st.shape(&format!("{name}.weight"))?.to_vec();
-    Ok(Int8W::quantize(
-        &st.f16(&format!("{name}.weight"))?,
-        s[0],
-        s[1],
-    ))
+    Ok(Int8W::quantize(&st.f16(&format!("{name}.weight"))?, s[0], s[1]))
 }
 
 impl Model {
@@ -146,10 +142,7 @@ impl Model {
         for l in 0..LAYERS {
             let p = format!("encoder.layers.{l}.");
             let norm = |n: &str| -> io::Result<Norm> {
-                Ok(Norm {
-                    w: st.f32(&format!("{p}{n}.weight"))?,
-                    b: st.f32(&format!("{p}{n}.bias"))?,
-                })
+                Ok(Norm { w: st.f32(&format!("{p}{n}.weight"))?, b: st.f32(&format!("{p}{n}.bias"))? })
             };
             let w = st.f32(&format!("{p}conv.depthwise_conv.weight"))?;
             let gamma = st.f32(&format!("{p}conv.norm.weight"))?;
@@ -166,9 +159,7 @@ impl Model {
                 }
             }
             layers.push(Layer {
-                lin: (0..11)
-                    .map(|_| lin.next().unwrap())
-                    .collect::<io::Result<_>>()?,
+                lin: (0..11).map(|_| lin.next().unwrap()).collect::<io::Result<_>>()?,
                 norm_ff1: norm("norm_feed_forward1")?,
                 norm_att: norm("norm_self_att")?,
                 norm_conv: norm("norm_conv")?,
@@ -180,9 +171,7 @@ impl Model {
                 dw_bias,
             });
         }
-        let lin_f = |w: &str, b: &str| -> io::Result<Packed> {
-            Ok(Packed::linear(&st.f32(w)?, &st.f32(b)?))
-        };
+        let lin_f = |w: &str, b: &str| -> io::Result<Packed> { Ok(Packed::linear(&st.f32(w)?, &st.f32(b)?)) };
         let taps_of = |name: &str| -> io::Result<Vec<f32>> {
             let w = st.f32(name)?;
             let mut t = vec![0f32; w.len()];
@@ -228,8 +217,7 @@ impl Model {
             let bias_hh = st.f32(&format!("{p}bias_hh_l{i}"))?;
             let mut w = vec![0u16; bias.len() * 2 * ENCODED];
             for o in 0..bias.len() {
-                w[o * 2 * ENCODED..o * 2 * ENCODED + ENCODED]
-                    .copy_from_slice(&ih[o * ENCODED..(o + 1) * ENCODED]);
+                w[o * 2 * ENCODED..o * 2 * ENCODED + ENCODED].copy_from_slice(&ih[o * ENCODED..(o + 1) * ENCODED]);
                 w[o * 2 * ENCODED + ENCODED..(o + 1) * 2 * ENCODED]
                     .copy_from_slice(&hh[o * ENCODED..(o + 1) * ENCODED]);
                 bias[o] += bias_hh[o];
@@ -242,23 +230,11 @@ impl Model {
             layers,
             conv0: taps_of(&format!("{sub}layers.0.weight"))?,
             conv0_bias: st.f32(&format!("{sub}layers.0.bias"))?,
-            sub_dw: [
-                taps_of(&format!("{sub}layers.2.weight"))?,
-                taps_of(&format!("{sub}layers.5.weight"))?,
-            ],
-            sub_dw_bias: [
-                st.f32(&format!("{sub}layers.2.bias"))?,
-                st.f32(&format!("{sub}layers.5.bias"))?,
-            ],
+            sub_dw: [taps_of(&format!("{sub}layers.2.weight"))?, taps_of(&format!("{sub}layers.5.weight"))?],
+            sub_dw_bias: [st.f32(&format!("{sub}layers.2.bias"))?, st.f32(&format!("{sub}layers.5.bias"))?],
             sub_pw: [
-                lin_f(
-                    &format!("{sub}layers.3.weight"),
-                    &format!("{sub}layers.3.bias"),
-                )?,
-                lin_f(
-                    &format!("{sub}layers.6.weight"),
-                    &format!("{sub}layers.6.bias"),
-                )?,
+                lin_f(&format!("{sub}layers.3.weight"), &format!("{sub}layers.3.bias"))?,
+                lin_f(&format!("{sub}layers.6.weight"), &format!("{sub}layers.6.bias"))?,
             ],
             sub_linear,
             enc_proj: lin_f("encoder_projector.weight", "encoder_projector.bias")?,
@@ -273,12 +249,7 @@ impl Model {
                 &st.f16("decoder.decoder_projector.weight")?,
                 &st.f32("decoder.decoder_projector.bias")?,
             ),
-            joint: Half::pack(
-                ENCODED,
-                VOCAB + DURATIONS,
-                &st.f16("joint.head.weight")?,
-                &st.f32("joint.head.bias")?,
-            ),
+            joint: Half::pack(ENCODED, VOCAB + DURATIONS, &st.f16("joint.head.weight")?, &st.f32("joint.head.bias")?),
             embedding: st.f32("decoder.embedding.weight")?,
             act: QAct::default(),
             scratch: Default::default(),
@@ -303,13 +274,7 @@ impl Model {
 
     fn apply(&self, layer: usize, which: usize, y: *mut f32) {
         let _c = self.times.clock(Stage::Int8Gemm);
-        int8::gemm(
-            &self.pool,
-            &self.layers[layer].lin[which],
-            &self.act,
-            y,
-            self.vnni,
-        );
+        int8::gemm(&self.pool, &self.layers[layer].lin[which], &self.act, y, self.vnni);
     }
 
     /// Rows past the valid length are zeroed after each stride 2 conv only (reference quirk), so the pointwise bias
@@ -362,34 +327,17 @@ impl Model {
                                 n += 1;
                             }
                         }
-                        conv_taps(
-                            m.conv0_bias.as_ptr(),
-                            &t[..n],
-                            |j, _| set(x[j]),
-                            out.add(w * c),
-                            c,
-                            true,
-                        );
+                        conv_taps(m.conv0_bias.as_ptr(), &t[..n], |j, _| set(x[j]), out.add(w * c), c, true);
                     }
                 };
                 for i in 0..n2 {
                     for r in if i > 0 { 2 * i + 1 } else { 0 }..=2 * i + 2 {
                         conv0_row(r);
                     }
-                    let rows = [
-                        ring_p.at(2 * i % 3 * w1),
-                        ring_p.at((2 * i + 1) % 3 * w1),
-                        ring_p.at((2 * i + 2) % 3 * w1),
-                    ];
+                    let rows =
+                        [ring_p.at(2 * i % 3 * w1), ring_p.at((2 * i + 1) % 3 * w1), ring_p.at((2 * i + 2) % 3 * w1)];
                     let live = lo2 + i as isize >= 0 && lo2 + (i as isize) < v2 as isize;
-                    depthwise_row(
-                        &rows,
-                        32,
-                        live,
-                        &m.sub_dw[0],
-                        &m.sub_dw_bias[0],
-                        tmp.as_mut_ptr().add(i * w2),
-                    );
+                    depthwise_row(&rows, 32, live, &m.sub_dw[0], &m.sub_dw_bias[0], tmp.as_mut_ptr().add(i * w2));
                 }
                 pointwise(&m.sub_pw[0], tmp.as_ptr(), 32, lo2, n2, t2, s2.as_mut_ptr());
                 for i in 0..n3 {
@@ -398,34 +346,13 @@ impl Model {
                         s2.as_mut_ptr().add((2 * i + 1) * w2),
                         s2.as_mut_ptr().add((2 * i + 2) * w2),
                     ];
-                    depthwise_row(
-                        &rows,
-                        16,
-                        a + i < v3,
-                        &m.sub_dw[1],
-                        &m.sub_dw_bias[1],
-                        tmp.as_mut_ptr().add(i * w3),
-                    );
+                    depthwise_row(&rows, 16, a + i < v3, &m.sub_dw[1], &m.sub_dw_bias[1], tmp.as_mut_ptr().add(i * w3));
                 }
-                pointwise(
-                    &m.sub_pw[1],
-                    tmp.as_ptr(),
-                    16,
-                    a as isize,
-                    n3,
-                    t3,
-                    flat.at(a * w3),
-                );
+                pointwise(&m.sub_pw[1], tmp.as_ptr(), 16, a as isize, n3, t3, flat.at(a * w3));
             });
         });
         let mut out = vec![0f32; t3 * HIDDEN];
-        linear(
-            &self.pool,
-            &self.sub_linear,
-            flat.ptr(),
-            t3,
-            out.as_mut_ptr(),
-        );
+        linear(&self.pool, &self.sub_linear, flat.ptr(), t3, out.as_mut_ptr());
         (out, t3, v3)
     }
 
@@ -440,13 +367,7 @@ impl Model {
             let _f = FlushDenormals::new();
             unsafe { dense::silu(v.as_mut_ptr(), v.len()) };
         };
-        linear(
-            &self.pool,
-            &self.vad_proj,
-            hidden.as_ptr(),
-            t,
-            a.as_mut_ptr(),
-        );
+        linear(&self.pool, &self.vad_proj, hidden.as_ptr(), t, a.as_mut_ptr());
         silu(&mut a);
         for i in 0..t {
             for j in 0..5 {
@@ -457,13 +378,7 @@ impl Model {
                 }
             }
         }
-        linear(
-            &self.pool,
-            &self.vad_ctx,
-            window.as_ptr(),
-            t,
-            b.as_mut_ptr(),
-        );
+        linear(&self.pool, &self.vad_ctx, window.as_ptr(), t, b.as_mut_ptr());
         silu(&mut b);
         (0..t)
             .map(|i| {
@@ -481,19 +396,13 @@ impl Model {
         if t <= self.rel_t {
             return;
         }
-        self.rel_t = if self.rel_t > 0 {
-            t.max(SEGMENT_FRAMES)
-        } else {
-            t
-        };
+        self.rel_t = if self.rel_t > 0 { t.max(SEGMENT_FRAMES) } else { t };
         let rt = self.rel_t;
         let r = 2 * rt - 1;
         let h = HIDDEN;
         let mut positions = vec![0f32; r * h];
         let mut proj = vec![0f32; r * h];
-        let inverse: Vec<f32> = (0..h / 2)
-            .map(|i| 1.0 / 10000f32.powf((2 * i) as f32 / h as f32))
-            .collect();
+        let inverse: Vec<f32> = (0..h / 2).map(|i| 1.0 / 10000f32.powf((2 * i) as f32 / h as f32)).collect();
         {
             let pp = P::new(&mut positions);
             self.pool.for_each(r, 0, |j| {
@@ -510,13 +419,7 @@ impl Model {
         a.reserve(r, h);
         int8::quantize(&self.pool, positions.as_ptr(), &mut a);
         for layer in 0..LAYERS {
-            int8::gemm(
-                &self.pool,
-                &self.layers[layer].lin[REL],
-                &a,
-                proj.as_mut_ptr(),
-                self.vnni,
-            );
+            int8::gemm(&self.pool, &self.layers[layer].lin[REL], &a, proj.as_mut_ptr(), self.vnni);
             let rel = P(self.rel[layer].as_mut_ptr());
             let pr = P(proj.as_mut_ptr());
             self.pool.for_each(HEADS, 0, |hd| unsafe {
@@ -527,15 +430,7 @@ impl Model {
 
     /// Query i reads its T position scores at columns rel_t - 1 - i onward, so a block of query rows needs only the
     /// union window of T + rows - 1 columns. One work item is (head, row block).
-    fn attention_mix(
-        &mut self,
-        layer: usize,
-        t: usize,
-        q: *const f32,
-        k: *const f32,
-        v: *const f32,
-        out: *mut f32,
-    ) {
+    fn attention_mix(&mut self, layer: usize, t: usize, q: *const f32, k: *const f32, v: *const f32, out: *mut f32) {
         let _c = self.times.clock(Stage::Attention);
         let d = HEAD_DIM;
         let tp = (t + 15) & !15;
@@ -571,24 +466,14 @@ impl Model {
                 let biased = |query: &mut [f32], bias: &[f32]| {
                     for i in 0..m {
                         for dd in 0..d {
-                            query[i * d + dd] =
-                                *q.at((i0 + i) * HIDDEN + h * d + dd) + bias[h * d + dd];
+                            query[i * d + dd] = *q.at((i0 + i) * HIDDEN + h * d + dd) + bias[h * d + dd];
                         }
                     }
                 };
                 // Padding and scores far below the row peak become denormal probabilities, each a microcode assist.
                 let _f = FlushDenormals::new();
                 biased(query, &lay.bias_u);
-                dense::gemm(
-                    &kp[h],
-                    query.as_ptr(),
-                    d,
-                    m,
-                    content.as_mut_ptr(),
-                    tp,
-                    0,
-                    kp[h].panels(),
-                );
+                dense::gemm(&kp[h], query.as_ptr(), d, m, content.as_mut_ptr(), tp, 0, kp[h].panels());
                 biased(query, &lay.bias_v);
                 let first = (rel_t - 1 - i0) as isize;
                 let p0 = (first - m as isize + 1) / 16;
@@ -614,8 +499,7 @@ impl Model {
                 }
                 for i in 0..m {
                     let s = content.as_mut_ptr().add(i * tp);
-                    let pp =
-                        pos.offset((i * wp) as isize + (rel_t - 1 - (i0 + i)) as isize - p0 * 16);
+                    let pp = pos.offset((i * wp) as isize + (rel_t - 1 - (i0 + i)) as isize - p0 * 16);
                     for j in 0..t {
                         *s.add(j) = (*s.add(j) + *pp.add(j)) * scale;
                     }
@@ -624,16 +508,7 @@ impl Model {
                     }
                     dense::softmax(s, tp);
                 }
-                dense::gemm(
-                    &vp[h],
-                    content.as_ptr(),
-                    tp,
-                    m,
-                    out.at(i0 * HIDDEN + h * d),
-                    HIDDEN,
-                    0,
-                    d / 16,
-                );
+                dense::gemm(&vp[h], content.as_ptr(), tp, m, out.at(i0 * HIDDEN + h * d), HIDDEN, 0, d / 16);
             });
         });
     }
@@ -687,14 +562,7 @@ impl Model {
                     }
                     let inp = q.at((i + j0 - 4) * h);
                     let o = n.at(i * h);
-                    conv_taps(
-                        lay.dw_bias.as_ptr(),
-                        &w[..ntaps],
-                        |j, c| ld(inp.add(j * h + c)),
-                        o,
-                        h,
-                        false,
-                    );
+                    conv_taps(lay.dw_bias.as_ptr(), &w[..ntaps], |j, c| ld(inp.add(j * h + c)), o, h, false);
                     dense::silu(o, h);
                     quantize_rows(n.ptr(), h, qa.ptr(), sx.ptr(), i, i + 1);
                 });
@@ -705,13 +573,7 @@ impl Model {
             self.norm(layer, t, 0.5, 4, xp, y, xp, false);
         }
         let mut encoded = vec![0f32; t * ENCODED];
-        linear(
-            &self.pool,
-            &self.enc_proj,
-            x.as_ptr(),
-            t,
-            encoded.as_mut_ptr(),
-        );
+        linear(&self.pool, &self.enc_proj, x.as_ptr(), t, encoded.as_mut_ptr());
         (encoded, t)
     }
 
@@ -733,28 +595,14 @@ impl Model {
             self.reserve(t, HIDDEN);
         }
         let lay = &self.layers[layer];
-        let ln = [
-            &lay.norm_ff1,
-            &lay.norm_att,
-            &lay.norm_conv,
-            &lay.norm_ff2,
-            &lay.norm_out,
-        ][which];
+        let ln = [&lay.norm_ff1, &lay.norm_att, &lay.norm_conv, &lay.norm_ff2, &lay.norm_out][which];
         let (qa, sx) = (P(self.act.q.as_mut_ptr()), P(self.act.sx.as_mut_ptr()));
         self.pool.for_each(t, 0, |i| unsafe {
             let row = x.at(i * HIDDEN);
             if scale != 0.0 {
-                for j in 0..HIDDEN {
-                    *row.add(j) += scale * *y.at(i * HIDDEN + j);
-                }
+                dense::residual(row, y.at(i * HIDDEN), scale, HIDDEN);
             }
-            dense::layer_norm(
-                row,
-                ln.w.as_ptr(),
-                ln.b.as_ptr(),
-                out.at(i * HIDDEN),
-                HIDDEN,
-            );
+            dense::layer_norm(row, ln.w.as_ptr(), ln.b.as_ptr(), out.at(i * HIDDEN), HIDDEN);
             if quantize {
                 quantize_rows(out.ptr(), HIDDEN, qa.ptr(), sx.ptr(), i, i + 1);
             }
@@ -804,14 +652,7 @@ unsafe fn conv_taps<X: Fn(usize, usize) -> crate::simd::F8>(
 }
 
 /// One output row [W][channel] of a stride 2 depthwise 3x3 from its three input rows [2W][channel].
-unsafe fn depthwise_row(
-    rows: &[*mut f32; 3],
-    wd: usize,
-    live: bool,
-    dw: &[f32],
-    dw_bias: &[f32],
-    out: *mut f32,
-) {
+unsafe fn depthwise_row(rows: &[*mut f32; 3], wd: usize, live: bool, dw: &[f32], dw_bias: &[f32], out: *mut f32) {
     unsafe {
         let c = SUB_CH;
         if !live {
@@ -829,28 +670,13 @@ unsafe fn depthwise_row(
                     n += 1;
                 }
             }
-            conv_taps(
-                dw_bias.as_ptr(),
-                &t[..n],
-                |j, ch| ld(x[j].add(ch)),
-                out.add(w * c),
-                c,
-                false,
-            );
+            conv_taps(dw_bias.as_ptr(), &t[..n], |j, ch| ld(x[j].add(ch)), out.add(w * c), c, false);
         }
     }
 }
 
 /// Pointwise conv and ReLU over n rows [W][channel] starting at global row lo. Rows outside [0, total) are padding.
-unsafe fn pointwise(
-    pw: &Packed,
-    inp: *const f32,
-    wd: usize,
-    lo: isize,
-    n: usize,
-    total: usize,
-    out: *mut f32,
-) {
+unsafe fn pointwise(pw: &Packed, inp: *const f32, wd: usize, lo: isize, n: usize, total: usize, out: *mut f32) {
     unsafe {
         let c = SUB_CH;
         dense::gemm(pw, inp, c, n * wd, out, c, 0, pw.panels());
@@ -880,17 +706,11 @@ pub fn convert(src: &Path, dst: &Path) -> io::Result<()> {
             packed.push((name, w));
         }
     }
-    let lin_weights: std::collections::HashSet<String> =
-        packed.iter().map(|(n, _)| format!("{n}.weight")).collect();
+    let lin_weights: std::collections::HashSet<String> = packed.iter().map(|(n, _)| format!("{n}.weight")).collect();
     let mut raw = Vec::new();
     for n in names {
         if !lin_weights.contains(n) && !n.ends_with("num_batches_tracked") {
-            raw.push((
-                n.clone(),
-                st.get(n)?.dtype.clone(),
-                st.shape(n)?.to_vec(),
-                st.bytes(n)?,
-            ));
+            raw.push((n.clone(), st.get(n)?.dtype.clone(), st.shape(n)?.to_vec(), st.bytes(n)?));
         }
     }
     let as_bytes = |p: *const u8, n: usize| unsafe { std::slice::from_raw_parts(p, n) };
@@ -921,12 +741,7 @@ pub fn convert(src: &Path, dst: &Path) -> io::Result<()> {
             "F32" => "F32",
             other => return Err(bad(format!("{n}: unexpected dtype {other}"))),
         };
-        entries.push(Entry {
-            name: n.clone(),
-            dtype,
-            shape: s.clone(),
-            data: b,
-        });
+        entries.push(Entry { name: n.clone(), dtype, shape: s.clone(), data: b });
     }
     crate::st::write(dst, &entries)
 }

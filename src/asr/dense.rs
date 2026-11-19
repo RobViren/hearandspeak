@@ -27,25 +27,13 @@ impl Packed {
         }
     }
     /// B[k][n] = src[k * sk + n * sn]. A linear weight [N][K] is (sk 1, sn K); a matrix [K][N] is (sk N, sn 1).
-    pub unsafe fn pack(
-        &mut self,
-        k: usize,
-        n: usize,
-        src: *const f32,
-        sk: usize,
-        sn: usize,
-        bias: Option<&[f32]>,
-    ) {
+    pub unsafe fn pack(&mut self, k: usize, n: usize, src: *const f32, sk: usize, sn: usize, bias: Option<&[f32]>) {
         self.resize(k, n);
         let mut o = 0;
         for n0 in (0..n).step_by(16) {
             for kk in 0..k {
                 for j in 0..16 {
-                    self.p[o + j] = if n0 + j < n {
-                        unsafe { *src.add(kk * sk + (n0 + j) * sn) }
-                    } else {
-                        0.0
-                    };
+                    self.p[o + j] = if n0 + j < n { unsafe { *src.add(kk * sk + (n0 + j) * sn) } } else { 0.0 };
                 }
                 o += 16;
             }
@@ -137,22 +125,14 @@ pub unsafe fn gemm(
         for mb in (0..rows).step_by(BLOCK) {
             for p in p0..p1 {
                 let w = b.p.as_ptr().add(p * b.k * 16);
-                let bias = if bias_base.is_null() {
-                    bias_base
-                } else {
-                    bias_base.add(p * 16)
-                };
+                let bias = if bias_base.is_null() { bias_base } else { bias_base.add(p * 16) };
                 let n = 16.min(b.n - p * 16);
                 let me = rows.min(mb + BLOCK);
                 let mut m = mb;
                 while m + 6 <= me {
                     kernel::<6, 1>(w, b.k, a.add(m * astride), astride, bias, o);
                     for r in 0..6 {
-                        std::ptr::copy_nonoverlapping(
-                            o.add(r * 16),
-                            c.add((m + r) * cstride + p * 16),
-                            n,
-                        );
+                        std::ptr::copy_nonoverlapping(o.add(r * 16), c.add((m + r) * cstride + p * 16), n);
                     }
                     m += 6;
                 }
@@ -174,30 +154,10 @@ pub fn linear(pool: &Pool, b: &Packed, a: *const f32, rows: usize, c: *mut f32) 
         let cut = |i: usize| if i == n { rows } else { rows * i / n / 6 * 6 };
         pool.run(|i| unsafe {
             let m0 = cut(i);
-            gemm(
-                b,
-                a.at(m0 * b.k),
-                b.k,
-                cut(i + 1) - m0,
-                c.at(m0 * b.n),
-                b.n,
-                0,
-                np,
-            );
+            gemm(b, a.at(m0 * b.k), b.k, cut(i + 1) - m0, c.at(m0 * b.n), b.n, 0, np);
         });
     } else {
-        pool.run(|i| unsafe {
-            gemm(
-                b,
-                a.ptr(),
-                b.k,
-                rows,
-                c.ptr(),
-                b.n,
-                np * i / n,
-                np * (i + 1) / n,
-            )
-        });
+        pool.run(|i| unsafe { gemm(b, a.ptr(), b.k, rows, c.ptr(), b.n, np * i / n, np * (i + 1) / n) });
     }
 }
 
@@ -224,11 +184,7 @@ impl Half {
         for n0 in (0..n).step_by(16) {
             for kk in 0..k {
                 for j in 0..16 {
-                    p[o + j] = if n0 + j < n {
-                        weight[(n0 + j) * k + kk]
-                    } else {
-                        0
-                    };
+                    p[o + j] = if n0 + j < n { weight[(n0 + j) * k + kk] } else { 0 };
                 }
                 o += 16;
             }
@@ -247,10 +203,7 @@ pub struct Picks {
 
 impl Picks {
     pub fn new(x: &[f32], skip_zeros: bool) -> Picks {
-        let mut p = Picks {
-            n: [0; 4],
-            k: [[0; 320]; 4],
-        };
+        let mut p = Picks { n: [0; 4], k: [[0; 320]; 4] };
         for (i, &v) in x.iter().enumerate() {
             if !skip_zeros || v != 0.0 {
                 p.k[i % 4][p.n[i % 4]] = i as u16;
@@ -269,10 +222,7 @@ unsafe fn gemv(b: &Half, x: *const f32, s: &Picks, c: *mut f32, p0: usize, p1: u
         for p in p0..p1 {
             let w = b.p.as_ptr().add(p * b.k * 16);
             let mut acc = [[zero(); 2]; 4];
-            acc[0] = [
-                ld(b.bias.as_ptr().add(p * 16)),
-                ld(b.bias.as_ptr().add(p * 16 + 8)),
-            ];
+            acc[0] = [ld(b.bias.as_ptr().add(p * 16)), ld(b.bias.as_ptr().add(p * 16 + 8))];
             macro_rules! step {
                 ($u:expr, $i:expr) => {{
                     let k = s.k[$u][$i] as usize;
@@ -295,10 +245,7 @@ unsafe fn gemv(b: &Half, x: *const f32, s: &Picks, c: *mut f32, p0: usize, p1: u
                 }
             }
             for h in 0..2 {
-                st(
-                    c.add(p * 16 + h * 8),
-                    add(add(add(acc[0][h], acc[1][h]), acc[2][h]), acc[3][h]),
-                );
+                st(c.add(p * 16 + h * 8), add(add(add(acc[0][h], acc[1][h]), acc[2][h]), acc[3][h]));
             }
         }
     }
@@ -316,10 +263,8 @@ pub fn linear_half(pool: &Pool, b: &Half, x: *const f32, picks: &Picks, c: *mut 
 pub unsafe fn exp8(x: F8) -> F8 {
     unsafe {
         let x = min(max(x, set(-87.33654)), set(88.0));
-        let n = _mm256_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(mul(
-            x,
-            set(1.442_695_040_888_963_4),
-        ));
+        let n =
+            _mm256_round_ps::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(mul(x, set(1.442_695_040_888_963_4)));
         let mut r = fnma(n, set(0.693359375), x);
         r = fnma(n, set(-2.12194440e-4), r);
         let mut p = set(1.9875691500e-4);
@@ -329,10 +274,7 @@ pub unsafe fn exp8(x: F8) -> F8 {
         p = fma(p, r, set(1.6666665459e-1));
         p = fma(p, r, set(5.0000001201e-1));
         p = add(fma(p, mul(r, r), r), set(1.0));
-        let e = _mm256_slli_epi32::<23>(_mm256_add_epi32(
-            _mm256_cvttps_epi32(n),
-            _mm256_set1_epi32(127),
-        ));
+        let e = _mm256_slli_epi32::<23>(_mm256_add_epi32(_mm256_cvttps_epi32(n), _mm256_set1_epi32(127)));
         mul(p, _mm256_castsi256_ps(e))
     }
 }
@@ -353,6 +295,16 @@ pub fn argmax(x: &[f32]) -> usize {
 }
 
 // n is a multiple of 8 in all of these.
+/// x += scale * y, a product then a sum.
+#[target_feature(enable = "avx2,fma,f16c")]
+pub unsafe fn residual(x: *mut f32, y: *const f32, scale: f32, n: usize) {
+    unsafe {
+        for i in (0..n).step_by(8) {
+            st(x.add(i), add(ld(x.add(i)), mul(set(scale), ld(y.add(i)))));
+        }
+    }
+}
+
 #[target_feature(enable = "avx2,fma,f16c")]
 pub unsafe fn silu(x: *mut f32, n: usize) {
     unsafe {

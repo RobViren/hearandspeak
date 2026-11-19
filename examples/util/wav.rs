@@ -22,20 +22,11 @@ pub fn read(path: &str) -> (Vec<f32>, u32) {
             b"data" => {
                 let raw = &d[body..body + size];
                 let s: Vec<f32> = match (fmt, bits) {
-                    (1, 16) => raw
-                        .chunks_exact(2)
-                        .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
-                        .collect(),
-                    (3, 32) => raw
-                        .chunks_exact(4)
-                        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                        .collect(),
+                    (1, 16) => raw.chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0).collect(),
+                    (3, 32) => raw.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect(),
                     _ => panic!("{path}: unsupported wav format {fmt}/{bits}"),
                 };
-                let mono = s
-                    .chunks_exact(channels)
-                    .map(|f| f.iter().sum::<f32>() / channels as f32)
-                    .collect();
+                let mono = s.chunks_exact(channels).map(|f| f.iter().sum::<f32>() / channels as f32).collect();
                 return (mono, rate);
             }
             _ => {}

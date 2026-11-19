@@ -27,8 +27,7 @@ pub fn bad(msg: impl Into<String>) -> io::Error {
 
 impl SafeTensors {
     pub fn open(path: &Path) -> io::Result<Self> {
-        let file = File::open(path)
-            .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
+        let file = File::open(path).map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
         let mut n = [0u8; 8];
         file.read_exact_at(&mut n, 0)?;
         let n = u64::from_le_bytes(n);
@@ -46,22 +45,13 @@ impl SafeTensors {
                 name.clone(),
                 Tensor {
                     dtype: v.get("dtype").map_or("", |d| d.str()).to_string(),
-                    shape: v
-                        .get("shape")
-                        .map_or(&[][..], |s| s.arr())
-                        .iter()
-                        .map(|x| x.num() as usize)
-                        .collect(),
+                    shape: v.get("shape").map_or(&[][..], |s| s.arr()).iter().map(|x| x.num() as usize).collect(),
                     start: off.first().map_or(0, |x| x.num() as u64),
                     end: off.get(1).map_or(0, |x| x.num() as u64),
                 },
             );
         }
-        Ok(SafeTensors {
-            file,
-            base: 8 + n,
-            t,
-        })
+        Ok(SafeTensors { file, base: 8 + n, t })
     }
 
     pub fn has(&self, name: &str) -> bool {
@@ -69,9 +59,7 @@ impl SafeTensors {
     }
 
     pub fn get(&self, name: &str) -> io::Result<&Tensor> {
-        self.t
-            .get(name)
-            .ok_or_else(|| bad(format!("missing tensor {name}")))
+        self.t.get(name).ok_or_else(|| bad(format!("missing tensor {name}")))
     }
 
     pub fn shape(&self, name: &str) -> io::Result<&[usize]> {
@@ -82,11 +70,7 @@ impl SafeTensors {
     pub fn read_into(&self, name: &str, dst: &mut [u8]) -> io::Result<()> {
         let t = self.get(name)?;
         if (t.end - t.start) as usize != dst.len() {
-            return Err(bad(format!(
-                "{name}: {} bytes, expected {}",
-                t.end - t.start,
-                dst.len()
-            )));
+            return Err(bad(format!("{name}: {} bytes, expected {}", t.end - t.start, dst.len())));
         }
         self.file.read_exact_at(dst, self.base + t.start)
     }
@@ -102,25 +86,15 @@ impl SafeTensors {
         if self.get(name)?.dtype != "F16" {
             return Err(bad(format!("{name} is not F16")));
         }
-        Ok(self
-            .bytes(name)?
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect())
+        Ok(self.bytes(name)?.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect())
     }
 
     /// F16 or F32 widened to f32.
     pub fn f32(&self, name: &str) -> io::Result<Vec<f32>> {
         let b = self.bytes(name)?;
         match self.get(name)?.dtype.as_str() {
-            "F32" => Ok(b
-                .chunks_exact(4)
-                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                .collect()),
-            "F16" => Ok(b
-                .chunks_exact(2)
-                .map(|c| f16(u16::from_le_bytes([c[0], c[1]])))
-                .collect()),
+            "F32" => Ok(b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()),
+            "F16" => Ok(b.chunks_exact(2).map(|c| f16(u16::from_le_bytes([c[0], c[1]]))).collect()),
             d => Err(bad(format!("{name}: dtype {d}"))),
         }
     }

@@ -64,16 +64,7 @@ impl Resampler {
                 *d = c as f32;
             }
         }
-        Resampler {
-            l,
-            m,
-            taps,
-            table,
-            buf: vec![0.0; taps / 2 - 1],
-            origin: 0,
-            next: 0,
-            inputs: 0,
-        }
+        Resampler { l, m, taps, table, buf: vec![0.0; taps / 2 - 1], origin: 0, next: 0, inputs: 0 }
     }
 
     fn produce(&mut self, out: &mut Vec<f32>, limit: u64) {

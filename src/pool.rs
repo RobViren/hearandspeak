@@ -32,11 +32,7 @@ impl Pool {
     /// `threads == 0` uses the fast physical cores (the P-cores on a hybrid CPU), where throughput peaks.
     pub fn new(threads: usize) -> Arc<Pool> {
         let cpus = cpu::fast_cores();
-        let n = if threads > 0 {
-            threads
-        } else {
-            cpus.iter().filter(|c| !c.slow && !c.sibling).count().max(1)
-        };
+        let n = if threads > 0 { threads } else { cpus.iter().filter(|c| !c.slow && !c.sibling).count().max(1) };
         let cpu_of = |i: usize| (!cpus.is_empty()).then(|| cpus[i % cpus.len()]);
         let slow: Vec<bool> = (0..n).map(|i| cpu_of(i).is_some_and(|c| c.slow)).collect();
         let fast = slow.iter().filter(|s| !**s).count();
@@ -54,20 +50,10 @@ impl Pool {
             .map(|i| {
                 let s = shared.clone();
                 let id = cpu_of(i).map(|c| c.id);
-                thread::Builder::new()
-                    .name(format!("hs{i}"))
-                    .spawn(move || work(&s, i, id))
-                    .unwrap()
+                thread::Builder::new().name(format!("hs{i}")).spawn(move || work(&s, i, id)).unwrap()
             })
             .collect();
-        Arc::new(Pool {
-            n,
-            shared,
-            workers,
-            slow,
-            fast,
-            lock: Mutex::new(()),
-        })
+        Arc::new(Pool { n, shared, workers, slow, fast, lock: Mutex::new(()) })
     }
 
     /// f(i) for i in 0..n, one call per worker, returning when all are done.
@@ -102,11 +88,7 @@ impl Pool {
     /// Work claimed in grains from a shared counter, so fast cores take more. Slow cores stop claiming once the
     /// fast ones can finish the rest in one grain each; otherwise every call ends waiting on an E-core.
     pub fn for_each<F: Fn(usize) + Sync>(&self, count: usize, grain: usize, f: F) {
-        let grain = if grain == 0 {
-            (count / (8 * self.n)).max(1)
-        } else {
-            grain
-        };
+        let grain = if grain == 0 { (count / (8 * self.n)).max(1) } else { grain };
         let next = AtomicUsize::new(0);
         self.run(|i| {
             loop {
@@ -165,8 +147,7 @@ fn work(s: &Shared, i: usize, cpu: Option<usize>) {
         if s.stop.load(Acquire) {
             return;
         }
-        let (job, caller) =
-            unsafe { ((*s.job.get()).unwrap(), (*s.caller.get()).clone().unwrap()) };
+        let (job, caller) = unsafe { ((*s.job.get()).unwrap(), (*s.caller.get()).clone().unwrap()) };
         job(i);
         if s.pending.fetch_sub(1, AcqRel) == 1 {
             caller.unpark();
@@ -240,9 +221,7 @@ mod cpu {
         if r <= 0 {
             return Vec::new();
         }
-        (0..1024)
-            .filter(|&c| mask[c / 64] >> (c % 64) & 1 == 1)
-            .collect()
+        (0..1024).filter(|&c| mask[c / 64] >> (c % 64) & 1 == 1).collect()
     }
 
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
@@ -250,8 +229,14 @@ mod cpu {
         Vec::new()
     }
 
-    /// One entry per logical CPU in the affinity mask: physical cores fastest first, then their siblings.
+    /// One entry per logical CPU in the affinity mask: physical cores fastest first, then their siblings. Read once:
+    /// later calls may come from a thread a pool has already pinned.
     pub fn fast_cores() -> Vec<Cpu> {
+        static CPUS: std::sync::OnceLock<Vec<Cpu>> = std::sync::OnceLock::new();
+        CPUS.get_or_init(scan).clone()
+    }
+
+    fn scan() -> Vec<Cpu> {
         let read = |cpu: usize, f: &str| -> i64 {
             std::fs::read_to_string(format!("/sys/devices/system/cpu/cpu{cpu}/{f}"))
                 .ok()
@@ -262,10 +247,7 @@ mod cpu {
         let mut spare: Vec<(i64, usize)> = Vec::new();
         let mut top = 0;
         for cpu in affinity() {
-            let key = (
-                read(cpu, "topology/physical_package_id"),
-                read(cpu, "topology/core_id"),
-            );
+            let key = (read(cpu, "topology/physical_package_id"), read(cpu, "topology/core_id"));
             let freq = read(cpu, "cpufreq/cpuinfo_max_freq");
             top = top.max(freq);
             if cores.iter().any(|c| c.0 == key) {
@@ -277,19 +259,8 @@ mod cpu {
         cores.sort_by_key(|c| c.0);
         cores.sort_by(|a, b| b.1.cmp(&a.1));
         let slow = |f: i64| f * 10 < top * 9;
-        let mut out: Vec<Cpu> = cores
-            .iter()
-            .map(|c| Cpu {
-                id: c.2,
-                slow: slow(c.1),
-                sibling: false,
-            })
-            .collect();
-        out.extend(spare.iter().map(|&(f, id)| Cpu {
-            id,
-            slow: slow(f),
-            sibling: true,
-        }));
+        let mut out: Vec<Cpu> = cores.iter().map(|c| Cpu { id: c.2, slow: slow(c.1), sibling: false }).collect();
+        out.extend(spare.iter().map(|&(f, id)| Cpu { id, slow: slow(f), sibling: true }));
         out
     }
 }

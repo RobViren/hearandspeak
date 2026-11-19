@@ -26,14 +26,7 @@ pub struct Int8W {
 impl Int8W {
     pub fn alloc(out: usize, inp: usize) -> Int8W {
         let g = inp / GROUP;
-        Int8W {
-            out,
-            inp,
-            g,
-            w: Buf::new(out * inp),
-            init: Buf::new(g * out),
-            scale: Buf::new(g * out),
-        }
+        Int8W { out, inp, g, w: Buf::new(out * inp), init: Buf::new(g * out), scale: Buf::new(g * out) }
     }
 
     /// weight [out][in] in f16.
@@ -92,14 +85,7 @@ impl QAct {
 }
 
 #[target_feature(enable = "avx2,fma,f16c")]
-pub unsafe fn quantize_rows(
-    x: *const f32,
-    c: usize,
-    q: *mut u8,
-    sx: *mut f32,
-    t0: usize,
-    t1: usize,
-) {
+pub unsafe fn quantize_rows(x: *const f32, c: usize, q: *mut u8, sx: *mut f32, t0: usize, t1: usize) {
     unsafe {
         let absmask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7fffffff));
         let fix = _mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7);
@@ -118,8 +104,7 @@ pub unsafe fn quantize_rows(
                 let s = if mx > 0.0 { mx / 127.0 } else { 1.0 };
                 *sx.add(t * g_n + g) = s;
                 let inv = _mm256_set1_ps(1.0 / s);
-                let cv =
-                    |i: usize| _mm256_cvtps_epi32(_mm256_mul_ps(_mm256_loadu_ps(p.add(i)), inv));
+                let cv = |i: usize| _mm256_cvtps_epi32(_mm256_mul_ps(_mm256_loadu_ps(p.add(i)), inv));
                 for i in (0..GROUP).step_by(32) {
                     let b = _mm256_packs_epi16(
                         _mm256_packs_epi32(cv(i), cv(i + 8)),
@@ -158,13 +143,7 @@ struct TileArgs {
 }
 
 #[inline(always)]
-unsafe fn out_rows<const R: usize>(
-    a: &[__m256i; R],
-    scale: *const f32,
-    sx: *const f32,
-    y: *mut f32,
-    first: bool,
-) {
+unsafe fn out_rows<const R: usize>(a: &[__m256i; R], scale: *const f32, sx: *const f32, y: *mut f32, first: bool) {
     unsafe {
         let sxb = _mm256_broadcast_ss(&*sx);
         for r in 0..R {
@@ -172,11 +151,7 @@ unsafe fn out_rows<const R: usize>(
             let yr = y.add(r * 8);
             _mm256_storeu_ps(
                 yr,
-                if first {
-                    _mm256_mul_ps(v, sxb)
-                } else {
-                    _mm256_fmadd_ps(v, sxb, _mm256_loadu_ps(yr))
-                },
+                if first { _mm256_mul_ps(v, sxb) } else { _mm256_fmadd_ps(v, sxb, _mm256_loadu_ps(yr)) },
             );
         }
     }
@@ -237,16 +212,7 @@ unsafe fn tile_avx2<const R: usize>(a: &TileArgs) {
 }
 
 /// Rows [rb, rb + R) of 8-row blocks, frames [t0, t1). R is 12, 4 or 1.
-unsafe fn gemm_tile(
-    w: &Int8W,
-    a: &QAct,
-    y: *mut f32,
-    rb: usize,
-    r: usize,
-    t0: usize,
-    t1: usize,
-    vnni: bool,
-) {
+unsafe fn gemm_tile(w: &Int8W, a: &QAct, y: *mut f32, rb: usize, r: usize, t0: usize, t1: usize, vnni: bool) {
     unsafe {
         let rbn = w.out / ROWS;
         for g in 0..w.g {

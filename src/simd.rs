@@ -10,9 +10,7 @@ pub type F8 = __m256;
 
 /// The kernels need AVX2, FMA and F16C (x86-64-v3, Haswell or later).
 pub fn supported() -> bool {
-    is_x86_feature_detected!("avx2")
-        && is_x86_feature_detected!("fma")
-        && is_x86_feature_detected!("f16c")
+    is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") && is_x86_feature_detected!("f16c")
 }
 
 pub fn has_vnni() -> bool {
@@ -30,17 +28,11 @@ unsafe impl<T: Copy + Sync> Sync for Buf<T> {}
 impl<T: Copy> Buf<T> {
     pub fn new(len: usize) -> Self {
         if len == 0 {
-            return Buf {
-                ptr: NonNull::dangling(),
-                len,
-            };
+            return Buf { ptr: NonNull::dangling(), len };
         }
         let layout = Layout::from_size_align(len * size_of::<T>(), 64).unwrap();
         let p = unsafe { alloc_zeroed(layout) } as *mut T;
-        Buf {
-            ptr: NonNull::new(p).expect("out of memory"),
-            len,
-        }
+        Buf { ptr: NonNull::new(p).expect("out of memory"), len }
     }
     pub fn from(s: &[T]) -> Self {
         let mut b = Self::new(s.len());
@@ -53,10 +45,7 @@ impl<T: Copy> Drop for Buf<T> {
     fn drop(&mut self) {
         if self.len > 0 {
             unsafe {
-                dealloc(
-                    self.ptr.as_ptr() as *mut u8,
-                    Layout::from_size_align(self.len * size_of::<T>(), 64).unwrap(),
-                )
+                dealloc(self.ptr.as_ptr() as *mut u8, Layout::from_size_align(self.len * size_of::<T>(), 64).unwrap())
             }
         }
     }

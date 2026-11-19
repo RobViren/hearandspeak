@@ -31,26 +31,16 @@ pub struct Asr {
 impl Asr {
     /// Loads from `weights`, downloading missing files first (with the `download` feature).
     pub fn new(weights: &Weights, pool: Arc<Pool>) -> io::Result<Asr> {
-        Asr::from_files(
-            &weights.file(MODEL_FILE)?,
-            &weights.file(TOKENIZER_FILE)?,
-            pool,
-        )
+        Asr::from_files(&weights.file(MODEL_FILE)?, &weights.file(TOKENIZER_FILE)?, pool)
     }
 
     /// `model` is moondream's parakeet-ultra model.safetensors (f16, quantized to int8 at load) or the int8 file
     /// `convert` writes.
     pub fn from_files(model: &Path, tokenizer: &Path, pool: Arc<Pool>) -> io::Result<Asr> {
         if !crate::simd::supported() {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "needs a CPU with AVX2, FMA and F16C",
-            ));
+            return Err(io::Error::new(io::ErrorKind::Unsupported, "needs a CPU with AVX2, FMA and F16C"));
         }
-        Ok(Asr {
-            tok: Tokenizer::load(tokenizer)?,
-            model: Model::load(model, pool)?,
-        })
+        Ok(Asr { tok: Tokenizer::load(tokenizer)?, model: Model::load(model, pool)? })
     }
 
     /// Whole recording at any sample rate, mono in [-1, 1].
@@ -65,8 +55,7 @@ impl Asr {
     pub fn stream(&mut self, rate: u32) -> Stream<'_> {
         Stream {
             asr: self,
-            resampler: (rate != SAMPLE_RATE as u32)
-                .then(|| Resampler::new(rate, SAMPLE_RATE as u32)),
+            resampler: (rate != SAMPLE_RATE as u32).then(|| Resampler::new(rate, SAMPLE_RATE as u32)),
             pcm: Vec::new(),
             cursor: Cursor::default(),
             origin: 0,
@@ -130,10 +119,7 @@ impl Stream<'_> {
         for (a, b) in segs {
             let key = (base + a, base + b);
             if !self.cache.contains_key(&key) {
-                let text = self
-                    .asr
-                    .model
-                    .transcribe_segment(&open[a..b], &self.asr.tok);
+                let text = self.asr.model.transcribe_segment(&open[a..b], &self.asr.tok);
                 self.cache.insert(key, text);
             }
             parts.push(self.cache[&key].clone());
@@ -150,10 +136,7 @@ impl Stream<'_> {
             let key = (self.origin + a, self.origin + b);
             let text = match self.cache.remove(&key) {
                 Some(t) => t,
-                None => self
-                    .asr
-                    .model
-                    .transcribe_segment(&self.pcm[a..b], &self.asr.tok),
+                None => self.asr.model.transcribe_segment(&self.pcm[a..b], &self.asr.tok),
             };
             self.seen = key.1;
             if !text.is_empty() {
@@ -184,17 +167,8 @@ pub(crate) enum Stage {
     Decode,
     Vad,
 }
-const STAGES: [&str; 9] = [
-    "frontend",
-    "subsampler",
-    "quantize",
-    "int8_gemm",
-    "attention",
-    "depthwise",
-    "norms_act",
-    "decoder_joint",
-    "vad",
-];
+const STAGES: [&str; 9] =
+    ["frontend", "subsampler", "quantize", "int8_gemm", "attention", "depthwise", "norms_act", "decoder_joint", "vad"];
 
 #[derive(Default)]
 pub(crate) struct Times {
@@ -227,4 +201,13 @@ impl Times {
             })
             .collect()
     }
+}
+
+#[doc(hidden)]
+pub fn bench_frontend(pool: &Pool, pcm: &[f32], reps: usize) -> f64 {
+    let t = Instant::now();
+    for _ in 0..reps {
+        std::hint::black_box(frontend::log_mel(pool, pcm));
+    }
+    t.elapsed().as_secs_f64() / reps as f64 * 1e3
 }

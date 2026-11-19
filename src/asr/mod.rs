@@ -118,6 +118,31 @@ pub struct Stream<'a> {
     partial: Option<(usize, String)>,
 }
 
+/// A `Stream` detached from its `Asr`, so one `Asr` can serve several interleaved streams.
+pub struct Parked {
+    resampler: Option<Resampler>,
+    opts: StreamOpts,
+    pcm: Vec<f32>,
+    origin: usize,
+    checked: usize,
+    finals: usize,
+    partial: Option<(usize, String)>,
+}
+
+impl Asr {
+    pub fn resume(&mut self, p: Parked) -> Stream<'_> {
+        let Parked { resampler, opts, pcm, origin, checked, finals, partial } = p;
+        Stream { asr: self, resampler, opts, pcm, origin, checked, finals, partial }
+    }
+}
+
+impl Stream<'_> {
+    pub fn park(self) -> Parked {
+        let Stream { resampler, opts, pcm, origin, checked, finals, partial, .. } = self;
+        Parked { resampler, opts, pcm, origin, checked, finals, partial }
+    }
+}
+
 enum Cut {
     Final(usize),
     Drop(usize),

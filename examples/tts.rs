@@ -15,12 +15,19 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let arg = |k: &str| args.iter().position(|a| a == k).map(|i| args[i + 1].clone());
     let pool = Pool::new(arg("-t").map_or(0, |t| t.parse().unwrap()));
-    let mut w = Weights::tts();
-    if let Some(d) = arg("-w") {
-        w.dir = d.into();
-    }
     let t0 = Instant::now();
-    let tts = Tts::new(&w, pool.clone()).unwrap();
+    // -w is a kokoallovero weights dir; -l swaps in another lexicon.bin.
+    let tts = match arg("-w") {
+        Some(d) => {
+            let p = |n: &str| std::path::PathBuf::from(&d).join(n);
+            let lex = arg("-l").map_or_else(|| p("g2p/lexicon.bin"), Into::into);
+            let (bin, tsv, voc, tag, gs) =
+                (p("kokoro.bin"), p("kokoro.tsv"), p("vocab.tsv"), p("g2p/tagger.bin"), p("g2p/guesser.bin"));
+            Tts::from_files(&bin, &tsv, &voc, &lex, &tag, &gs, pool.clone())
+        }
+        None => Tts::new(&Weights::tts(), pool.clone()),
+    }
+    .unwrap();
     eprintln!("load\t{:.2}\tthreads {}", t0.elapsed().as_secs_f64(), pool.n);
     if args.iter().any(|a| a == "--g2p") {
         for line in std::io::stdin().lock().lines() {

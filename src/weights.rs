@@ -3,12 +3,10 @@
 use std::io;
 use std::path::PathBuf;
 
-/// moondream/parakeet-ultra at a pinned revision: model.safetensors (f16, 1.2 GB) and tokenizer.json.
-pub const ASR_URL: &str =
-    "https://huggingface.co/moondream/parakeet-ultra/resolve/73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b";
-/// Rob's hosted kokoallovero assets: kokoro.bin/.tsv (f32, weight norm folded), vocab.tsv, g2p/*.bin. The same repo's
-/// parakeet/ folder holds the ternary redux model, which this crate does not run, so ASR comes from moondream.
-pub const TTS_URL: &str = "https://huggingface.co/rodbiren/kokoro_parakeet_aio_models/resolve/main/kokoro";
+/// Rob's model repo. parakeet-ultra/ holds parakeet-ultra with its encoder linears prepacked as int8 (written by
+/// examples/convert_parakeet.rs) and tokenizer.json; kokoro/ holds kokoallovero's assets as they are; hearandspeak/
+/// holds files this crate bakes itself (the lexicon from ipa_everywhere). tools/publish_weights.sh uploads them.
+pub const REPO_URL: &str = "https://huggingface.co/rodbiren/kokoro_parakeet_aio_models/resolve/main";
 
 /// A directory of model files plus the base URL missing files are fetched from (`url/name`).
 #[derive(Clone, Debug)]
@@ -27,11 +25,11 @@ pub fn data_dir() -> PathBuf {
 
 impl Weights {
     pub fn asr() -> Weights {
-        Weights { dir: data_dir().join("parakeet-ultra"), url: ASR_URL.into() }
+        Weights { dir: data_dir(), url: REPO_URL.into() }
     }
 
     pub fn tts() -> Weights {
-        Weights { dir: data_dir().join("kokoro"), url: TTS_URL.into() }
+        Weights { dir: data_dir(), url: REPO_URL.into() }
     }
 
     /// Path of `name` under dir, downloaded first if it is missing.

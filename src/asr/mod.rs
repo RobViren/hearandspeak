@@ -9,19 +9,18 @@ mod int8;
 use crate::pool::Pool;
 use crate::resample::Resampler;
 use crate::weights::Weights;
-use decode::{Cursor, MIN_SAMPLES, Tokenizer};
+use decode::{MIN_SAMPLES, Tokenizer};
 use encoder::Model;
 pub use encoder::convert;
 use frontend::SAMPLE_RATE;
-use std::collections::HashMap;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::time::Instant;
 
-pub const MODEL_FILE: &str = "model.safetensors";
-pub const TOKENIZER_FILE: &str = "tokenizer.json";
+pub const MODEL_FILE: &str = "parakeet-ultra/model.safetensors";
+pub const TOKENIZER_FILE: &str = "parakeet-ultra/tokenizer.json";
 
 pub struct Asr {
     model: Model,
@@ -43,24 +42,34 @@ impl Asr {
         Ok(Asr { tok: Tokenizer::load(tokenizer)?, model: Model::load(model, pool)? })
     }
 
-    /// Whole recording at any sample rate, mono in [-1, 1].
+    /// Whole recording at any sample rate, mono in [-1, 1]. Segments exactly as parakeetogo does: a recording up to
+    /// 30 s is one segment, longer ones are cut at pauses into segments of at most 30 s.
     pub fn transcribe(&mut self, pcm: &[f32], rate: u32) -> String {
-        let mut s = self.stream(rate);
-        let mut parts = s.push(pcm);
-        parts.extend(s.finish());
-        parts.join(" ")
+        let pcm = crate::resample::resample(pcm, rate, SAMPLE_RATE as u32);
+        if pcm.len() < MIN_SAMPLES {
+            return String::new();
+        }
+        let segs = self.model.segments(&pcm);
+        let parts: Vec<String> =
+            segs.into_iter().map(|(a, b)| self.model.transcribe_segment(&pcm[a..b], &self.tok)).collect();
+        parts.into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" ")
     }
 
-    /// Incremental transcription of audio pushed in chunks of any size.
+    /// Incremental transcription of audio pushed in chunks of any size, with default options.
     pub fn stream(&mut self, rate: u32) -> Stream<'_> {
+        self.stream_with(rate, StreamOpts::default())
+    }
+
+    pub fn stream_with(&mut self, rate: u32, opts: StreamOpts) -> Stream<'_> {
         Stream {
             asr: self,
             resampler: (rate != SAMPLE_RATE as u32).then(|| Resampler::new(rate, SAMPLE_RATE as u32)),
+            opts,
             pcm: Vec::new(),
-            cursor: Cursor::default(),
             origin: 0,
-            seen: 0,
-            cache: HashMap::new(),
+            checked: 0,
+            finals: 0,
+            partial: None,
         }
     }
 
@@ -70,88 +79,140 @@ impl Asr {
     }
 }
 
-/// Segments close at pauses once the VAD can place them, on exactly the cuts a whole-recording transcription makes:
-/// a recording up to 30 s is one segment, longer ones are cut into segments of at most 30 s, decided a 120 s block
-/// at a time. `push` returns the text of segments that closed; `partial` transcribes the audio still open (cached per
-/// segment, so calling it regularly keeps `finish` down to the last segment).
+/// When a streamed segment closes.
+#[derive(Clone, Copy, Debug)]
+pub struct StreamOpts {
+    /// Trailing silence after speech, in seconds, that closes the segment.
+    pub pause: f32,
+    /// Longest segment in seconds; past this the segment is cut at its best pause (or hard cut).
+    pub max_seconds: f32,
+    /// How much new audio, in seconds, between VAD checks of the open segment.
+    pub check_every: f32,
+}
+
+impl Default for StreamOpts {
+    fn default() -> Self {
+        StreamOpts { pause: 0.6, max_seconds: 30.0, check_every: 0.2 }
+    }
+}
+
+/// A finished segment: its text and where it sits in the stream, in seconds.
+#[derive(Clone, Debug)]
+pub struct Segment {
+    pub text: String,
+    pub start: f64,
+    pub end: f64,
+}
+
+/// Holds only the audio since the last final segment. Every `check_every` seconds of new audio the VAD head scans
+/// it: once speech is followed by `pause` seconds of silence the segment is transcribed and returned as final, and
+/// its audio dropped. Silence alone is dropped without transcribing.
 pub struct Stream<'a> {
     asr: &'a mut Asr,
     resampler: Option<Resampler>,
+    opts: StreamOpts,
     pcm: Vec<f32>,
-    cursor: Cursor,
     origin: usize,
-    seen: usize,
-    cache: HashMap<(usize, usize), String>,
+    checked: usize,
+    finals: usize,
+    partial: Option<(usize, String)>,
+}
+
+enum Cut {
+    Final(usize),
+    Drop(usize),
 }
 
 impl Stream<'_> {
-    pub fn push(&mut self, chunk: &[f32]) -> Vec<String> {
+    pub fn push(&mut self, chunk: &[f32]) -> Vec<Segment> {
         match &mut self.resampler {
             Some(r) => r.push(chunk, &mut self.pcm),
             None => self.pcm.extend_from_slice(chunk),
         }
-        if self.pcm.len() < self.cursor.need {
-            return Vec::new();
+        let mut out = Vec::new();
+        let step = (self.opts.check_every * SAMPLE_RATE as f32) as usize;
+        if self.pcm.len() < self.checked + step.max(1) {
+            return out;
         }
-        self.close(false)
+        self.checked = self.pcm.len();
+        while let Some(cut) = self.cut() {
+            match cut {
+                Cut::Final(n) => out.extend(self.close(n)),
+                Cut::Drop(n) => self.drop_front(n),
+            }
+        }
+        out
     }
 
-    pub fn finish(mut self) -> Vec<String> {
+    pub fn finish(mut self) -> Vec<Segment> {
         if let Some(r) = &mut self.resampler {
             r.finish(&mut self.pcm);
         }
-        if self.origin + self.pcm.len() < MIN_SAMPLES {
+        if self.pcm.len() < MIN_SAMPLES {
             return Vec::new();
         }
-        self.close(true)
+        let speech = !self.asr.model.block_speech(&self.pcm).is_empty();
+        if !speech && self.finals > 0 {
+            return Vec::new();
+        }
+        let n = self.pcm.len();
+        self.close(n).into_iter().collect()
     }
 
-    /// Text of the audio not yet closed into segments, as it would read if the recording ended now.
+    /// Text of the open segment as it would read if it closed now. Costs one transcription of at most
+    /// `max_seconds` of audio, and nothing when no audio arrived since the last call.
     pub fn partial(&mut self) -> String {
-        let open = &self.pcm[self.cursor.open..];
-        if open.len() < MIN_SAMPLES {
+        if self.pcm.len() < MIN_SAMPLES {
             return String::new();
         }
-        let base = self.origin + self.cursor.open;
-        let mut c = Cursor::default();
-        let segs = self.asr.model.segments(open, &mut c, true);
-        let mut parts = Vec::new();
-        for (a, b) in segs {
-            let key = (base + a, base + b);
-            if !self.cache.contains_key(&key) {
-                let text = self.asr.model.transcribe_segment(&open[a..b], &self.asr.tok);
-                self.cache.insert(key, text);
-            }
-            parts.push(self.cache[&key].clone());
+        if let Some((n, t)) = &self.partial
+            && *n == self.pcm.len()
+        {
+            return t.clone();
         }
-        parts.retain(|p| !p.is_empty());
-        parts.join(" ")
+        let t = self.asr.model.transcribe_segment(&self.pcm, &self.asr.tok);
+        self.partial = Some((self.pcm.len(), t.clone()));
+        t
     }
 
-    fn close(&mut self, last: bool) -> Vec<String> {
-        self.cursor.moved |= self.origin > 0;
-        let segs = self.asr.model.segments(&self.pcm, &mut self.cursor, last);
-        let mut out = Vec::new();
-        for (a, b) in segs {
-            let key = (self.origin + a, self.origin + b);
-            let text = match self.cache.remove(&key) {
-                Some(t) => t,
-                None => self.asr.model.transcribe_segment(&self.pcm[a..b], &self.asr.tok),
-            };
-            self.seen = key.1;
-            if !text.is_empty() {
-                out.push(text);
-            }
+    fn cut(&mut self) -> Option<Cut> {
+        let sr = SAMPLE_RATE as f64;
+        let n = self.pcm.len();
+        if n < MIN_SAMPLES {
+            return None;
         }
-        let seen = self.seen;
-        self.cache.retain(|k, _| k.0 >= seen);
-        let keep = self.cursor.keep;
-        self.pcm.drain(..keep);
-        self.origin += keep;
-        self.cursor.open -= keep;
-        self.cursor.need -= keep;
-        self.cursor.keep = 0;
-        out
+        let secs = n as f64 / sr;
+        let (pause, max) = (self.opts.pause as f64, self.opts.max_seconds as f64);
+        let regions = self.asr.model.block_speech(&self.pcm);
+        let Some(&(_, end)) = regions.last() else {
+            // Silence only: keep a pause's worth in case speech is starting.
+            let keep = (pause * sr) as usize;
+            return (n > 2 * keep + MIN_SAMPLES).then(|| Cut::Drop(n - keep));
+        };
+        if secs - end >= pause {
+            return Some(Cut::Final((((end + pause / 2.0) * sr) as usize).min(n)));
+        }
+        if secs > max {
+            let at = decode::next_cut(&decode::pauses(regions, secs)).min(max);
+            return Some(Cut::Final(((at * sr).round() as usize).clamp(MIN_SAMPLES, n)));
+        }
+        None
+    }
+
+    fn close(&mut self, n: usize) -> Option<Segment> {
+        let text = self.asr.model.transcribe_segment(&self.pcm[..n], &self.asr.tok);
+        let sr = SAMPLE_RATE as f64;
+        let seg = Segment { text, start: self.origin as f64 / sr, end: (self.origin + n) as f64 / sr };
+        self.drop_front(n);
+        self.finals += 1;
+        (!seg.text.is_empty()).then_some(seg)
+    }
+
+    fn drop_front(&mut self, n: usize) {
+        self.pcm.drain(..n);
+        self.origin += n;
+        self.checked = self.checked.saturating_sub(n);
+        self.partial = None;
     }
 }
 

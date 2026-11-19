@@ -114,7 +114,7 @@ impl Model {
     }
 
     /// The VAD head sees every subsampler row, including the ones past the valid length (reference quirk).
-    fn block_speech(&mut self, pcm: &[f32]) -> Vec<(f64, f64)> {
+    pub(crate) fn block_speech(&mut self, pcm: &[f32]) -> Vec<(f64, f64)> {
         let (mel, frames, mel_valid) = frontend::log_mel(&self.pool, pcm);
         let (hidden, rows, valid) = self.subsample(&mel, frames, mel_valid);
         let p = self.vad(&hidden, rows);
@@ -140,45 +140,36 @@ impl Model {
         regions.into_iter().filter(|(a, b)| b - a >= VAD_MIN_SPEECH).map(|(a, b)| (a, b.min(seconds))).collect()
     }
 
-    /// The VAD blocks of a recording fall at fixed offsets once the audio past them is known, so segmenting can
-    /// resume from the block holding the open segment and land on exactly the cuts of one pass over the whole
-    /// recording. pcm starts on a block boundary; s.open is where the open segment starts in it. Without final,
-    /// blocks whose size still depends on unseen audio wait: s.need is the length that lets another block in, s.keep
-    /// the block boundary to resume from. A whole recording up to 30 s is one segment and never reaches the VAD head.
-    pub fn segments(&mut self, pcm: &[f32], s: &mut Cursor, last: bool) -> Vec<(usize, usize)> {
-        let cap = (SEGMENT_SECONDS * SAMPLE_RATE as f64) as isize;
-        let total = pcm.len() as isize;
-        if last && !s.moved && s.open == 0 && total <= cap {
-            s.open = total as usize;
-            return vec![(0, total as usize)];
+    /// Sample ranges to transcribe for a whole recording, as parakeetogo cuts them: up to 30 s is one segment and
+    /// never reaches the VAD head; longer audio is scanned in 120 s VAD blocks and cut at pauses into segments of at
+    /// most 30 s, dropping those without speech.
+    pub fn segments(&mut self, pcm: &[f32]) -> Vec<(usize, usize)> {
+        let cap = (SEGMENT_SECONDS * SAMPLE_RATE as f64) as usize;
+        let total = pcm.len();
+        if total <= cap {
+            return vec![(0, total)];
         }
+        let sr = SAMPLE_RATE as f64;
         let mut out = Vec::new();
         let mut regions: Vec<(f64, f64)> = Vec::new();
-        let (mut start, mut read, mut keep) = (s.open as isize, 0isize, 0isize);
-        let (block_n, tail) = (BLOCK_SAMPLES as isize, MIN_TAIL_SAMPLES as isize);
-        let sr = SAMPLE_RATE as f64;
+        let (mut start, mut read) = (0, 0);
         while read < total {
             let remaining = total - read;
-            if !last && remaining < block_n + tail {
-                break;
-            }
-            let block = if remaining <= block_n { remaining } else { block_n.min(remaining - tail) };
-            if read + block > start {
-                let offset = (read - start) as f64 / sr;
-                for (a, b) in self.block_speech(&pcm[read as usize..(read + block) as usize]) {
-                    if b + offset > 0.0 {
-                        regions.push(((a + offset).max(0.0), b + offset));
-                    }
+            let block =
+                if remaining <= BLOCK_SAMPLES { remaining } else { BLOCK_SAMPLES.min(remaining - MIN_TAIL_SAMPLES) };
+            let offset = (read as f64 - start as f64) / sr;
+            for (a, b) in self.block_speech(&pcm[read..read + block]) {
+                if b + offset > 0.0 {
+                    regions.push(((a + offset).max(0.0), b + offset));
                 }
             }
-            keep = read;
             read += block;
             while read - start > cap {
                 let cut =
-                    (next_cut(&pauses(regions.clone(), (read - start) as f64 / sr)) * sr).round_ties_even() as isize;
+                    (next_cut(&pauses(regions.clone(), (read - start) as f64 / sr)) * sr).round_ties_even() as usize;
                 let seconds = cut as f64 / sr;
                 if has_speech(&regions, seconds) {
-                    out.push((start as usize, (start + cut) as usize));
+                    out.push((start, start + cut));
                 }
                 start += cut;
                 regions = regions
@@ -188,18 +179,9 @@ impl Model {
                     .collect();
             }
         }
-        if last {
-            if read - start >= MIN_SAMPLES as isize && has_speech(&regions, (read - start) as f64 / sr) {
-                out.push((start as usize, read as usize));
-            }
-            start = read;
+        if read - start >= MIN_SAMPLES && has_speech(&regions, (read - start) as f64 / sr) {
+            out.push((start, read));
         }
-        *s = Cursor {
-            open: start as usize,
-            keep: keep as usize,
-            need: (read + block_n + tail) as usize,
-            moved: s.moved,
-        };
         out
     }
 
@@ -210,16 +192,6 @@ impl Model {
     }
 }
 
-/// Where segmentation of a growing recording stands, relative to the buffer passed in: the open segment's start,
-/// the block boundary the next call may resume from, and the length the buffer must reach before more can close.
-#[derive(Clone, Copy, Default, Debug)]
-pub struct Cursor {
-    pub open: usize,
-    pub keep: usize,
-    pub need: usize,
-    pub moved: bool,
-}
-
 const FRAME_SECONDS: f64 = 0.08;
 const VAD_THRESHOLD: f32 = 0.5;
 const VAD_MIN_SPEECH: f64 = 0.1;
@@ -228,11 +200,11 @@ const SEGMENT_SECONDS: f64 = 30.0;
 const MIN_SEGMENT_SECONDS: f64 = 1.0;
 const MIN_PAUSE: f64 = 0.2;
 const PAUSE_EPS: f64 = 1e-6;
-pub const BLOCK_SAMPLES: usize = 120 * SAMPLE_RATE;
-pub const MIN_TAIL_SAMPLES: usize = SAMPLE_RATE / 2;
+const BLOCK_SAMPLES: usize = 120 * SAMPLE_RATE;
+const MIN_TAIL_SAMPLES: usize = SAMPLE_RATE / 2;
 pub const MIN_SAMPLES: usize = 320;
 
-fn pauses(mut regions: Vec<(f64, f64)>, seconds: f64) -> Vec<(f64, f64)> {
+pub(crate) fn pauses(mut regions: Vec<(f64, f64)>, seconds: f64) -> Vec<(f64, f64)> {
     regions.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let mut out = Vec::new();
     let mut previous: f64 = 0.0;
@@ -248,7 +220,7 @@ fn pauses(mut regions: Vec<(f64, f64)>, seconds: f64) -> Vec<(f64, f64)> {
     out
 }
 
-fn next_cut(pauses: &[(f64, f64)]) -> f64 {
+pub(crate) fn next_cut(pauses: &[(f64, f64)]) -> f64 {
     let mut pick = pauses.iter().rev().find(|p| p.0 >= MIN_SEGMENT_SECONDS && p.1 <= SEGMENT_SECONDS);
     if pick.is_none() {
         pick = pauses.iter().rev().find(|p| {

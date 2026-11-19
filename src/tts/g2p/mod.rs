@@ -149,27 +149,10 @@ fn last_char(s: &str) -> Option<char> {
     s.chars().next_back()
 }
 
+#[rustfmt::skip]
 const ONES: [&str; 20] = [
-    "",
-    "one",
-    "two",
-    "three",
-    "four",
-    "five",
-    "six",
-    "seven",
-    "eight",
-    "nine",
-    "ten",
-    "eleven",
-    "twelve",
-    "thirteen",
-    "fourteen",
-    "fifteen",
-    "sixteen",
-    "seventeen",
-    "eighteen",
-    "nineteen",
+    "", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen",
+    "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
 ];
 const TENS: [&str; 10] = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
 
@@ -215,14 +198,10 @@ fn digit_words(s: &str) -> Vec<String> {
 fn ordinal_words(s: &str) -> String {
     let w = int_words(s);
     let tail = w.rsplit(' ').next().unwrap_or(&w).to_string();
+    #[rustfmt::skip]
     let ord = [
-        ("one", "first"),
-        ("two", "second"),
-        ("three", "third"),
-        ("five", "fifth"),
-        ("eight", "eighth"),
-        ("nine", "ninth"),
-        ("twelve", "twelfth"),
+        ("one", "first"), ("two", "second"), ("three", "third"), ("five", "fifth"), ("eight", "eighth"),
+        ("nine", "ninth"), ("twelve", "twelfth"),
     ];
     let rep =
         ord.iter().find(|(a, _)| *a == tail).map(|(_, b)| b.to_string()).unwrap_or_else(|| {
@@ -485,24 +464,10 @@ fn restress(ps: &str) -> String {
 struct Unmappable;
 
 fn to_k(l: &Lexicon, ipa: &str, unstressed: bool) -> Result<String, Unmappable> {
+    #[rustfmt::skip]
     const SEQ: [(&str, &str); 18] = [
-        ("ɝ", "ɜɹ"),
-        ("ɚ", "əɹ"),
-        ("eɪ", "A"),
-        ("aɪ", "I"),
-        ("oʊ", "O"),
-        ("aʊ", "W"),
-        ("ɔɪ", "Y"),
-        ("dʒ", "ʤ"),
-        ("tʃ", "ʧ"),
-        ("g", "ɡ"),
-        ("r", "ɹ"),
-        ("ɾ", "T"),
-        ("ʔ", "t"),
-        ("ː", ""),
-        ("e", "A"),
-        ("o", "O"),
-        ("a", "æ"),
+        ("ɝ", "ɜɹ"), ("ɚ", "əɹ"), ("eɪ", "A"), ("aɪ", "I"), ("oʊ", "O"), ("aʊ", "W"), ("ɔɪ", "Y"), ("dʒ", "ʤ"),
+        ("tʃ", "ʧ"), ("g", "ɡ"), ("r", "ɹ"), ("ɾ", "T"), ("ʔ", "t"), ("ː", ""), ("e", "A"), ("o", "O"), ("a", "æ"),
         ("iɹ", "ɪɹ"),
     ];
     let mut s = ipa.replace(' ', "");
@@ -516,87 +481,21 @@ fn to_k(l: &Lexicon, ipa: &str, unstressed: bool) -> Result<String, Unmappable> 
     Ok(s)
 }
 
+#[rustfmt::skip]
 const EXT: &[(&str, &str)] = &[
-    ("py", "pie"),
-    ("md", "MD"),
-    ("txt", "text"),
-    ("jsonl", "JSON L"),
-    ("sh", "SH"),
-    ("db", "DB"),
-    ("tsv", "TSV"),
-    ("csv", "CSV"),
-    ("js", "JS"),
-    ("ts", "TS"),
-    ("rs", "RS"),
-    ("wav", "wave"),
-    ("pt", "PT"),
-    ("onnx", "onyx"),
-    ("yml", "YAML"),
-    ("yaml", "YAML"),
-    ("toml", "tommel"),
-    ("cfg", "config"),
-    ("so", "SO"),
-    ("m4a", "M4A"),
-    ("log", "log"),
-    ("jsx", "JSX"),
-    ("tsx", "TSX"),
-    ("mjs", "MJS"),
-    ("cjs", "CJS"),
-    ("json", "JSON"),
-    ("html", "HTML"),
-    ("htm", "HTML"),
-    ("css", "CSS"),
-    ("scss", "SCSS"),
-    ("svg", "SVG"),
-    ("png", "PNG"),
-    ("jpg", "jay peg"),
-    ("jpeg", "jay peg"),
-    ("gif", "gif"),
-    ("webp", "web P"),
-    ("pdf", "PDF"),
-    ("mp3", "MP3"),
-    ("mp4", "MP4"),
-    ("webm", "web M"),
-    ("opus", "opus"),
-    ("flac", "flack"),
-    ("ogg", "ogg"),
-    ("kt", "KT"),
-    ("kts", "KTS"),
-    ("java", "java"),
-    ("go", "go"),
-    ("c", "C"),
-    ("h", "H"),
-    ("cpp", "CPP"),
-    ("hpp", "HPP"),
-    ("cu", "CU"),
-    ("rb", "RB"),
-    ("lua", "lua"),
-    ("sql", "sequel"),
-    ("xml", "XML"),
-    ("ini", "INI"),
-    ("env", "env"),
-    ("lock", "lock"),
-    ("zsh", "ZSH"),
-    ("bash", "bash"),
-    ("ps1", "PS1"),
-    ("bat", "bat"),
-    ("exe", "exe"),
-    ("dll", "DLL"),
-    ("apk", "APK"),
-    ("zip", "zip"),
-    ("gz", "GZ"),
-    ("tar", "tar"),
-    ("gguf", "GGUF"),
-    ("bin", "bin"),
-    ("safetensors", "safe tensors"),
-    ("ckpt", "checkpoint"),
-    ("npy", "NPY"),
-    ("npz", "NPZ"),
-    ("ipynb", "notebook"),
-    ("gradle", "gradle"),
-    ("vue", "view"),
-    ("svelte", "svelte"),
-    ("swift", "swift"),
+    ("py", "pie"), ("md", "MD"), ("txt", "text"), ("jsonl", "JSON L"), ("sh", "SH"), ("db", "DB"), ("tsv", "TSV"),
+    ("csv", "CSV"), ("js", "JS"), ("ts", "TS"), ("rs", "RS"), ("wav", "wave"), ("pt", "PT"), ("onnx", "onyx"),
+    ("yml", "YAML"), ("yaml", "YAML"), ("toml", "tommel"), ("cfg", "config"), ("so", "SO"), ("m4a", "M4A"),
+    ("log", "log"), ("jsx", "JSX"), ("tsx", "TSX"), ("mjs", "MJS"), ("cjs", "CJS"), ("json", "JSON"), ("html", "HTML"),
+    ("htm", "HTML"), ("css", "CSS"), ("scss", "SCSS"), ("svg", "SVG"), ("png", "PNG"), ("jpg", "jay peg"),
+    ("jpeg", "jay peg"), ("gif", "gif"), ("webp", "web P"), ("pdf", "PDF"), ("mp3", "MP3"), ("mp4", "MP4"),
+    ("webm", "web M"), ("opus", "opus"), ("flac", "flack"), ("ogg", "ogg"), ("kt", "KT"), ("kts", "KTS"),
+    ("java", "java"), ("go", "go"), ("c", "C"), ("h", "H"), ("cpp", "CPP"), ("hpp", "HPP"), ("cu", "CU"), ("rb", "RB"),
+    ("lua", "lua"), ("sql", "sequel"), ("xml", "XML"), ("ini", "INI"), ("env", "env"), ("lock", "lock"), ("zsh", "ZSH"),
+    ("bash", "bash"), ("ps1", "PS1"), ("bat", "bat"), ("exe", "exe"), ("dll", "DLL"), ("apk", "APK"), ("zip", "zip"),
+    ("gz", "GZ"), ("tar", "tar"), ("gguf", "GGUF"), ("bin", "bin"), ("safetensors", "safe tensors"),
+    ("ckpt", "checkpoint"), ("npy", "NPY"), ("npz", "NPZ"), ("ipynb", "notebook"), ("gradle", "gradle"),
+    ("vue", "view"), ("svelte", "svelte"), ("swift", "swift"),
 ];
 
 fn ext(e: &str) -> Option<&'static str> {
@@ -777,34 +676,14 @@ fn numbers(t: String) -> String {
     let t = sub_t(&R[7], &t, "about ");
     let t = sub_t(&R[8], &t, "\\1 to \\2");
     let t = sub(&R[9], &t, |m| {
+        #[rustfmt::skip]
         const U: [(&str, &str); 28] = [
-            ("k", "thousand"),
-            ("K", "thousand"),
-            ("M", "million"),
-            ("B", "billion"),
-            ("x", "times"),
-            ("×", "times"),
-            ("KB", "kilobytes"),
-            ("kB", "kilobytes"),
-            ("MB", "megabytes"),
-            ("GB", "gigabytes"),
-            ("TB", "terabytes"),
-            ("PB", "petabytes"),
-            ("ms", "milliseconds"),
-            ("ns", "nanoseconds"),
-            ("µs", "microseconds"),
-            ("μs", "microseconds"),
-            ("GHz", "gigahertz"),
-            ("MHz", "megahertz"),
-            ("kHz", "kilohertz"),
-            ("Hz", "hertz"),
-            ("Gbps", "gigabits per second"),
-            ("Mbps", "megabits per second"),
-            ("kbps", "kilobits per second"),
-            ("fps", "frames per second"),
-            ("km", "kilometers"),
-            ("kg", "kilograms"),
-            ("cm", "centimeters"),
+            ("k", "thousand"), ("K", "thousand"), ("M", "million"), ("B", "billion"), ("x", "times"), ("×", "times"),
+            ("KB", "kilobytes"), ("kB", "kilobytes"), ("MB", "megabytes"), ("GB", "gigabytes"), ("TB", "terabytes"),
+            ("PB", "petabytes"), ("ms", "milliseconds"), ("ns", "nanoseconds"), ("µs", "microseconds"),
+            ("μs", "microseconds"), ("GHz", "gigahertz"), ("MHz", "megahertz"), ("kHz", "kilohertz"), ("Hz", "hertz"),
+            ("Gbps", "gigabits per second"), ("Mbps", "megabits per second"), ("kbps", "kilobits per second"),
+            ("fps", "frames per second"), ("km", "kilometers"), ("kg", "kilograms"), ("cm", "centimeters"),
             ("mm", "millimeters"),
         ];
         let unit = if set(m, 2) { g(m, 2) } else { g(m, 3) };
@@ -845,15 +724,10 @@ fn nfc(l: &Lexicon, s: &str) -> String {
 fn normalize_impl(l: &Lexicon, text: &str) -> String {
     let t = nfc(l, text).replace('“', "\"").replace('”', "\"").replace('‘', "'").replace('’', "'");
     let mut t = markdown(&t);
+    #[rustfmt::skip]
     const ABBREV: [(&str, &str); 8] = [
-        ("e.g.", "for example"),
-        ("e.g", "for example"),
-        ("i.e.", "that is"),
-        ("i.e", "that is"),
-        ("etc.", "et cetera"),
-        ("vs.", "versus"),
-        ("vs", "versus"),
-        ("approx.", "approximately"),
+        ("e.g.", "for example"), ("e.g", "for example"), ("i.e.", "that is"), ("i.e", "that is"), ("etc.", "et cetera"),
+        ("vs.", "versus"), ("vs", "versus"), ("approx.", "approximately"),
     ];
     static R: LazyLock<Vec<Re>> = LazyLock::new(|| {
         let mut v: Vec<Re> =
@@ -886,12 +760,9 @@ fn normalize_impl(l: &Lexicon, text: &str) -> String {
     });
     let r = |i: usize| &R[8 + i];
     t = sub(r(0), &t, |m| {
+        #[rustfmt::skip]
         let w = [
-            ("Dr", "Doctor"),
-            ("Mr", "Mister"),
-            ("Mrs", "Missus"),
-            ("Ms", "Miz"),
-            ("Prof", "Professor"),
+            ("Dr", "Doctor"), ("Mr", "Mister"), ("Mrs", "Missus"), ("Ms", "Miz"), ("Prof", "Professor"),
             ("Mt", "Mount"),
         ];
         w.iter().find(|(k, _)| *k == g(m, 1)).map_or_else(|| g(m, 0).to_string(), |(_, v)| v.to_string())
@@ -914,19 +785,11 @@ fn normalize_impl(l: &Lexicon, text: &str) -> String {
     });
     t = sub_t(r(5), &t, "et cetera.");
     t = sub(r(6), &t, |m| {
+        #[rustfmt::skip]
         let w = [
-            ("Jan", "January"),
-            ("Feb", "February"),
-            ("Mar", "March"),
-            ("Apr", "April"),
-            ("Jun", "June"),
-            ("Jul", "July"),
-            ("Aug", "August"),
-            ("Sep", "September"),
-            ("Sept", "September"),
-            ("Oct", "October"),
-            ("Nov", "November"),
-            ("Dec", "December"),
+            ("Jan", "January"), ("Feb", "February"), ("Mar", "March"), ("Apr", "April"), ("Jun", "June"),
+            ("Jul", "July"), ("Aug", "August"), ("Sep", "September"), ("Sept", "September"), ("Oct", "October"),
+            ("Nov", "November"), ("Dec", "December"),
         ];
         w.iter().find(|(k, _)| *k == g(m, 1)).map_or_else(|| g(m, 0).to_string(), |(_, v)| v.to_string())
     });
@@ -958,24 +821,11 @@ fn normalize_impl(l: &Lexicon, text: &str) -> String {
     t = sub_t(r(15), &t, " slash ");
     t = sub_t(r(16), &t, " ");
     t = sub_t(r(17), &t, " equals ");
+    #[rustfmt::skip]
     const SYMBOLS: [(&str, &str); 17] = [
-        ("→", " to "),
-        ("←", " from "),
-        ("↔", " and "),
-        ("≈", " about "),
-        ("≤", " at most "),
-        ("≥", " at least "),
-        ("&", " and "),
-        ("=", " equals "),
-        ("×", " times "),
-        ("@", " at "),
-        ("#", " number "),
-        ("•", ", "),
-        ("|", ", "),
-        ("+", " plus "),
-        ("%", " percent "),
-        ("°", " degrees "),
-        ("§", " section "),
+        ("→", " to "), ("←", " from "), ("↔", " and "), ("≈", " about "), ("≤", " at most "), ("≥", " at least "),
+        ("&", " and "), ("=", " equals "), ("×", " times "), ("@", " at "), ("#", " number "), ("•", ", "), ("|", ", "),
+        ("+", " plus "), ("%", " percent "), ("°", " degrees "), ("§", " section "),
     ];
     for (k, v) in SYMBOLS {
         t = t.replace(k, v);
@@ -1170,33 +1020,10 @@ fn fold(s: &str) -> String {
 }
 
 const IPA_CHARS: &str = "əɚɝɪʊʌɛæɑɔɹʃʒθðŋˈˌɾʔ";
+#[rustfmt::skip]
 const LETTERS: [&str; 26] = [
-    "eɪ",
-    "bi",
-    "si",
-    "di",
-    "i",
-    "ɛf",
-    "dʒi",
-    "eɪtʃ",
-    "aɪ",
-    "dʒeɪ",
-    "keɪ",
-    "ɛl",
-    "ɛm",
-    "ɛn",
-    "oʊ",
-    "pi",
-    "kju",
-    "ɑɹ",
-    "ɛs",
-    "ti",
-    "ju",
-    "vi",
-    "dʌbəlju",
-    "ɛks",
-    "waɪ",
-    "zi",
+    "eɪ", "bi", "si", "di", "i", "ɛf", "dʒi", "eɪtʃ", "aɪ", "dʒeɪ", "keɪ", "ɛl", "ɛm", "ɛn", "oʊ", "pi", "kju", "ɑɹ",
+    "ɛs", "ti", "ju", "vi", "dʌbəlju", "ɛks", "waɪ", "zi",
 ];
 
 fn tag_class(tag: &str) -> &'static str {
@@ -1271,14 +1098,9 @@ impl G2p {
 
     fn lex(&self, key: &str, tag: &str) -> Option<Hit> {
         let r = self.lex.row(key)?;
+        #[rustfmt::skip]
         const STRONG: [(&str, &str); 7] = [
-            ("us", "ʌs"),
-            ("them", "ðɛm"),
-            ("her", "hɝ"),
-            ("your", "jɔɹ"),
-            ("am", "æm"),
-            ("as", "æz"),
-            ("than", "ðæn"),
+            ("us", "ʌs"), ("them", "ðɛm"), ("her", "hɝ"), ("your", "jɔɹ"), ("am", "æm"), ("as", "æz"), ("than", "ðæn"),
         ];
         let hit = |ipa: String, src: String| Some(Hit { ipa, src, unstressed: false });
         if r.status == b'r' {
@@ -1487,13 +1309,9 @@ impl G2p {
             return Ok(vec![Part { text: word.into(), ps: self.k(&ipa, false)?, ipa: Some(ipa), src: "rule".into() }]);
         }
         if hyphen {
+            #[rustfmt::skip]
             const PREFIXES: [(&str, &str); 7] = [
-                ("re", "ˌɹi"),
-                ("un", "ˌʌn"),
-                ("de", "ˌdi"),
-                ("pre", "ˌpɹi"),
-                ("co", "ˌkoʊ"),
-                ("non", "ˌnɑn"),
+                ("re", "ˌɹi"), ("un", "ˌʌn"), ("de", "ˌdi"), ("pre", "ˌpɹi"), ("co", "ˌkoʊ"), ("non", "ˌnɑn"),
                 ("sub", "ˌsʌb"),
             ];
             let d = word.find('-').unwrap();
@@ -1687,7 +1505,7 @@ fn load_lexicon(data: Vec<u8>) -> io::Result<Lexicon> {
         return Err(bad("bad magic"));
     }
     let mut p = 8;
-    let mut u32_at = |p: &mut usize| -> io::Result<u32> {
+    let u32_at = |p: &mut usize| -> io::Result<u32> {
         let b = data.get(*p..*p + 4).ok_or_else(|| bad("truncated"))?;
         *p += 4;
         Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
@@ -1840,7 +1658,7 @@ pub fn chunk(lines: &[String]) -> Vec<String> {
     let mut cur: U = Vec::new();
     for (k, mut s) in sents.into_iter().enumerate() {
         let mut atoms: Vec<U> = Vec::new();
-        let mut cut_first = |s: &mut U, from: usize, marks: &str, atoms: &mut Vec<U>| {
+        let cut_first = |s: &mut U, from: usize, marks: &str, atoms: &mut Vec<U>| {
             let mut i = from;
             while i + 1 < s.len() && i < MAX {
                 if marks.contains(s[i]) {

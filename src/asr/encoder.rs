@@ -24,18 +24,11 @@ pub const DURATIONS: usize = 5;
 const ATT_BLOCK: usize = 48;
 const SEGMENT_FRAMES: usize = 376;
 
+#[rustfmt::skip]
 const LINEARS: [&str; 11] = [
-    "feed_forward1.linear1",
-    "feed_forward1.linear2",
-    "self_attn.q_proj",
-    "self_attn.k_proj",
-    "self_attn.v_proj",
-    "self_attn.relative_k_proj",
-    "self_attn.o_proj",
-    "conv.pointwise_conv1",
-    "conv.pointwise_conv2",
-    "feed_forward2.linear1",
-    "feed_forward2.linear2",
+    "feed_forward1.linear1", "feed_forward1.linear2", "self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj",
+    "self_attn.relative_k_proj", "self_attn.o_proj", "conv.pointwise_conv1", "conv.pointwise_conv2",
+    "feed_forward2.linear1", "feed_forward2.linear2",
 ];
 const FF1_IN: usize = 0;
 const FF1_OUT: usize = 1;

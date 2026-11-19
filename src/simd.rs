@@ -34,11 +34,6 @@ impl<T: Copy> Buf<T> {
         let p = unsafe { alloc_zeroed(layout) } as *mut T;
         Buf { ptr: NonNull::new(p).expect("out of memory"), len }
     }
-    pub fn from(s: &[T]) -> Self {
-        let mut b = Self::new(s.len());
-        b.copy_from_slice(s);
-        b
-    }
 }
 
 impl<T: Copy> Drop for Buf<T> {
@@ -95,40 +90,6 @@ pub fn f16(h: u16) -> f32 {
         _ => f32::from_bits((e as u32 + 112) << 23 | m << 13),
     };
     if h & 0x8000 != 0 { -v } else { v }
-}
-
-pub fn f32_to_f16(x: f32) -> u16 {
-    let b = x.to_bits();
-    let sign = ((b >> 16) & 0x8000) as u16;
-    let e = ((b >> 23) & 255) as i32;
-    let m = b & 0x7f_ffff;
-    if e == 255 {
-        return sign | 0x7c00 | if m != 0 { 0x200 } else { 0 };
-    }
-    let e16 = e - 112;
-    if e16 >= 31 {
-        return sign | 0x7c00;
-    }
-    if e16 <= 0 {
-        if e16 < -10 {
-            return sign;
-        }
-        let m = m | 0x80_0000;
-        let shift = (14 - e16) as u32;
-        let half = 1 << (shift - 1);
-        let rest = m & ((1 << shift) - 1);
-        let mut v = m >> shift;
-        if rest > half || (rest == half && v & 1 == 1) {
-            v += 1;
-        }
-        return sign | v as u16;
-    }
-    let mut v = (e16 as u32) << 10 | m >> 13;
-    let rest = m & 0x1fff;
-    if rest > 0x1000 || (rest == 0x1000 && v & 1 == 1) {
-        v += 1;
-    }
-    sign | v as u16
 }
 
 #[inline(always)]

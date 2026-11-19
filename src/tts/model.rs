@@ -31,9 +31,6 @@ impl Weights {
         f.read_exact(unsafe { std::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut u8, n * 4) })?;
         Ok(Weights { data, index: parse_index(&std::fs::read_to_string(tsv)?) })
     }
-    pub fn from_parts(data: crate::simd::Buf<f32>, index: &str) -> Weights {
-        Weights { data, index: parse_index(index) }
-    }
     pub fn has(&self, name: &str) -> bool {
         self.index.contains_key(name)
     }
@@ -46,9 +43,6 @@ impl Weights {
     }
     fn ptr(&self, name: &str) -> *const f32 {
         if self.has(name) { self.get(name).as_ptr() } else { std::ptr::null() }
-    }
-    pub fn names(&self) -> impl Iterator<Item = &String> {
-        self.index.keys()
     }
 }
 
@@ -905,41 +899,14 @@ fn text_encoder(pool: &Pool, m: &Model, ids: &[usize]) -> Act {
     x
 }
 
-thread_local!(static LAP: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) });
-
-fn dump(name: &str, v: &[f32]) {
-    if std::env::var_os("HS_TRACE").is_some() {
-        let now = std::time::Instant::now();
-        if let Some(t) = LAP.get() {
-            eprintln!("{name:14} {:8.1}", (now - t).as_secs_f64() * 1e3);
-        }
-        LAP.set(Some(now));
-    }
-    if let Some(d) = std::env::var_os("HS_DUMP") {
-        let b: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
-        std::fs::write(std::path::Path::new(&d).join(format!("{name}.f32")), b).unwrap();
-    }
-}
-
-fn dump_act(name: &str, a: &Act) {
-    if std::env::var_os("HS_DUMP").is_none() && std::env::var_os("HS_TRACE").is_none() {
-        return;
-    }
-    let v: Vec<f32> = (0..a.c).flat_map(|c| a.r(c).iter().copied()).collect();
-    dump(name, &v);
-}
-
 /// One chunk of at most 510 phoneme ids (plus the two pads) to 24 kHz audio.
 pub fn synthesize(m: &Model, pool: &Pool, ids: &[usize], style: &[f32], speed: f32, noise: &mut Noise) -> Vec<f32> {
     let (timbre, prosody) = (&style[..STYLE], &style[STYLE..]);
     let n = ids.len();
-    LAP.set(Some(std::time::Instant::now()));
     let b = bert(pool, m, ids);
-    dump("bert", &b);
     let bert_enc = m.bert_encoder.run(pool, &b);
     let d = duration_encoder(pool, m, &bert_enc, prosody);
     let logits = m.duration_proj.run(pool, &run_lstm(pool, &m.lstm, &d));
-    dump("dur_enc", &d);
     let dp = m.duration_proj.out;
     let frames: Vec<usize> = (0..n)
         .map(|t| {
@@ -975,8 +942,6 @@ pub fn synthesize(m: &Model, pool: &Pool, ids: &[usize], style: &[f32], speed: f
         *cv = p.r(0).to_vec();
     }
     let [f0, nc] = curves;
-    dump("f0", &f0);
-    dump("n", &nc);
 
     let te = text_encoder(pool, m, ids);
     let mut asr = Act::new(512, t_total);
@@ -986,11 +951,9 @@ pub fn synthesize(m: &Model, pool: &Pool, ids: &[usize], style: &[f32], speed: f
             ar[j] = tr[src[j]];
         }
     }
-    dump_act("text_enc", &te);
     let f0c = run_strided(pool, &m.f0_conv, &curve(&f0));
     let ncc = run_strided(pool, &m.n_conv, &curve(&nc));
     let mut x = run_res_blk(pool, &m.encode, timbre, &cat(&[&asr, &f0c, &ncc]));
-    dump_act("dec.encode", &x);
     let mut ar = Act::new(64, t_total);
     apply(pool, &m.asr_res, &asr, &mut ar);
     for i in 0..4 {
@@ -999,9 +962,6 @@ pub fn synthesize(m: &Model, pool: &Pool, ids: &[usize], style: &[f32], speed: f
 
     let src_wave = source(pool, m, &f0, noise);
     let har = stft(pool, &src_wave);
-    dump_act("dec.decode3", &x);
-    dump("source", &src_wave);
-    dump_act("har", &har);
     for i in 0..2 {
         leaky(pool, &mut x, 0.1);
         x = run_conv_t(pool, &m.ups[i], &x);
@@ -1015,14 +975,11 @@ pub fn synthesize(m: &Model, pool: &Pool, ids: &[usize], style: &[f32], speed: f
             }
             x = p;
         }
-        dump_act(&format!("gen.up{i}"), &x);
         let mut ns = if i == 0 { run_strided(pool, &m.noise_conv0, &har) } else { Act::new(x.c, x.t) };
         if i == 1 {
             apply(pool, &m.noise_conv1, &har, &mut ns);
         }
-        dump_act(&format!("gen.noiseconv{i}"), &ns);
         run_res_block1(pool, &m.noise_res[i], timbre, &mut ns);
-        dump_act(&format!("gen.noise{i}"), &ns);
         let (xb, xs, xt) = (x.base(), x.stride, x.t);
         let nsr = &ns;
         pool.for_split(x.c, |c| {
@@ -1044,14 +1001,9 @@ pub fn synthesize(m: &Model, pool: &Pool, ids: &[usize], style: &[f32], speed: f
                 r[t] = (a[t] + b[t] + d[t]) / 3.0;
             }
         });
-        dump_act(&format!("gen.res{i}"), &x);
     }
-    dump_act("gen.res1", &x);
     leaky(pool, &mut x, 0.01);
     let mut post = Act::new(2 * BINS, x.t);
     apply(pool, &m.conv_post, &x, &mut post);
-    dump_act("conv_post", &post);
-    let a = unsafe { istft(&post) };
-    dump("audio", &a);
-    a
+    unsafe { istft(&post) }
 }

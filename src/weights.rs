@@ -6,8 +6,9 @@ use std::path::PathBuf;
 /// moondream/parakeet-ultra at a pinned revision: model.safetensors (f16, 1.2 GB) and tokenizer.json.
 pub const ASR_URL: &str =
     "https://huggingface.co/moondream/parakeet-ultra/resolve/73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b";
-/// kokoallovero's assets at a pinned revision: kokoro.bin/.tsv (f32, weight norm folded), vocab.tsv, g2p/*.bin.
-pub const TTS_URL: &str = "https://huggingface.co/rodbiren/kokoro_parakeet_aio_models/resolve/766eb98b496915a437f38b1cec8e9458879cb2f3/kokoro";
+/// Rob's hosted kokoallovero assets: kokoro.bin/.tsv (f32, weight norm folded), vocab.tsv, g2p/*.bin. The same repo's
+/// parakeet/ folder holds the ternary redux model, which this crate does not run, so ASR comes from moondream.
+pub const TTS_URL: &str = "https://huggingface.co/rodbiren/kokoro_parakeet_aio_models/resolve/main/kokoro";
 
 /// A directory of model files plus the base URL missing files are fetched from (`url/name`).
 #[derive(Clone, Debug)]

@@ -13,7 +13,7 @@ download = ["dep:ureq"]
 
 [dependencies]
 fancy-regex = { version = "0.14", optional = true }
-ureq = { version = "3", optional = true }
+ureq = { version = "3", optional = true, default-features = false, features = ["rustls"] }
 
 [profile.release]
 codegen-units = 1

@@ -1,5 +1,6 @@
 //! Minimal wav io for the examples: PCM16 or float32, mono or mixed down.
 
+#[allow(dead_code)]
 pub fn read(path: &str) -> (Vec<f32>, u32) {
     let d = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
     let u16_at = |i: usize| u16::from_le_bytes([d[i], d[i + 1]]);

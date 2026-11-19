@@ -3,10 +3,13 @@
 
 #[cfg(feature = "asr")]
 pub mod asr;
+#[cfg_attr(not(feature = "asr"), allow(dead_code))]
 mod json;
 pub mod pool;
 pub mod resample;
+#[cfg_attr(not(feature = "asr"), allow(dead_code))]
 mod simd;
+#[cfg_attr(not(feature = "asr"), allow(dead_code))]
 mod st;
 #[cfg(feature = "tts")]
 pub mod tts;

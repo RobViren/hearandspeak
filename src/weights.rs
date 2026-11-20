@@ -44,7 +44,8 @@ impl Weights {
 
 #[cfg(feature = "download")]
 fn fetch(url: &str, path: &std::path::Path) -> io::Result<()> {
-    let part = path.with_extension("part");
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
+    let part = path.with_extension(format!("part.{}.{nanos}", std::process::id()));
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)?;
     }

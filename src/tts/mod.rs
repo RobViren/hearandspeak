@@ -15,9 +15,15 @@ use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Files a `Weights` directory must hold for TTS.
-pub const FILES: [&str; 6] =
-    ["kokoro.bin", "kokoro.tsv", "vocab.tsv", "g2p/lexicon.bin", "g2p/tagger.bin", "g2p/guesser.bin"];
+/// Files a `Weights` directory must hold for TTS, laid out as in the HF repo.
+pub const FILES: [&str; 6] = [
+    "kokoro/kokoro.bin",
+    "kokoro/kokoro.tsv",
+    "kokoro/vocab.tsv",
+    "hearandspeak/g2p/lexicon.bin",
+    "kokoro/g2p/tagger.bin",
+    "kokoro/g2p/guesser.bin",
+];
 
 const BUILTIN: [(&str, &[u8]); 3] = [
     ("af_heart", include_bytes!("../../voices/af_heart.bin")),

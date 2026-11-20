@@ -1,0 +1,40 @@
+[package]
+name = "hearandspeak-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hearandspeak = { path = ".." }
+
+[[bin]]
+name = "g2p"
+path = "fuzz_targets/g2p.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "resample"
+path = "fuzz_targets/resample.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "asr_stream"
+path = "fuzz_targets/asr_stream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tts_synth"
+path = "fuzz_targets/tts_synth.rs"
+test = false
+doc = false
+bench = false

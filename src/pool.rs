@@ -1,4 +1,5 @@
 use std::cell::UnsafeCell;
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering::*};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle, Thread};
@@ -12,6 +13,7 @@ struct Shared {
     generation: AtomicU64,
     pending: AtomicUsize,
     stop: AtomicBool,
+    panicked: AtomicBool,
     job: UnsafeCell<Option<Job>>,
     caller: UnsafeCell<Option<Thread>>,
 }
@@ -40,6 +42,7 @@ impl Pool {
             generation: AtomicU64::new(0),
             pending: AtomicUsize::new(0),
             stop: AtomicBool::new(false),
+            panicked: AtomicBool::new(false),
             job: UnsafeCell::new(None),
             caller: UnsafeCell::new(None),
         });
@@ -56,7 +59,8 @@ impl Pool {
         Arc::new(Pool { n, shared, workers, slow, fast, lock: Mutex::new(()) })
     }
 
-    /// f(i) for i in 0..n, one call per worker, returning when all are done.
+    /// f(i) for i in 0..n, one call per worker, returning when all are done. A panic in any f(i) is raised here once
+    /// every worker has finished, and the pool stays usable.
     pub fn run<F: Fn(usize) + Sync>(&self, f: F) {
         if self.n == 1 {
             return f(0);
@@ -73,7 +77,8 @@ impl Pool {
         for w in &self.workers {
             w.thread().unpark();
         }
-        f(0);
+        // Workers borrow f, so it must outlive them even when f(0) panics.
+        let own = catch_unwind(AssertUnwindSafe(|| f(0)));
         let mut spin = 0;
         while s.pending.load(Acquire) != 0 {
             if spin < SPIN {
@@ -82,6 +87,13 @@ impl Pool {
             } else {
                 thread::park();
             }
+        }
+        if let Err(e) = own {
+            s.panicked.store(false, SeqCst);
+            resume_unwind(e);
+        }
+        if s.panicked.swap(false, SeqCst) {
+            panic!("hearandspeak pool worker panicked");
         }
     }
 
@@ -148,7 +160,9 @@ fn work(s: &Shared, i: usize, cpu: Option<usize>) {
             return;
         }
         let (job, caller) = unsafe { ((*s.job.get()).unwrap(), (*s.caller.get()).clone().unwrap()) };
-        job(i);
+        if catch_unwind(AssertUnwindSafe(|| job(i))).is_err() {
+            s.panicked.store(true, SeqCst);
+        }
         if s.pending.fetch_sub(1, AcqRel) == 1 {
             caller.unpark();
         }

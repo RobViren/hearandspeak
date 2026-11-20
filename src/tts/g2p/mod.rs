@@ -158,6 +158,10 @@ const TENS: [&str; 10] = ["", "", "twenty", "thirty", "forty", "fifty", "sixty",
 
 /// Python ints are unbounded and every scale is a power of ten, so divmod is a split of the digit string.
 fn int_words(s: &str) -> String {
+    // \d is Unicode, so other scripts' digits get here; they are left as text.
+    if !s.bytes().all(|c| c.is_ascii_digit()) {
+        return s.into();
+    }
     let s = s.trim_start_matches('0');
     if s.is_empty() {
         return "zero".into();
@@ -837,6 +841,8 @@ fn normalize_impl(l: &Lexicon, text: &str) -> String {
 
 type Spans = Vec<(usize, usize)>;
 
+const AFFIX_WINDOW: usize = 64;
+
 /// spaCy Tokenizer._tokenize_affixes for one whitespace-free span [b, e) of full.
 fn tok_span(l: &Lexicon, full: &str, mut b: usize, mut e: usize, out: &mut Spans, specials: bool) {
     let special = |s: usize, t: usize| if specials { l.special(&full[s..t]) } else { None };
@@ -857,13 +863,18 @@ fn tok_span(l: &Lexicon, full: &str, mut b: usize, mut e: usize, out: &mut Spans
             break;
         }
         last = e - b;
-        let pre_len = l.prefix.find(&full[b..e], 0).map_or(0, |m| e_(&m) - b_(&m));
+        let head = &full[b..full.floor_char_boundary((b + AFFIX_WINDOW).min(e))];
+        let pre_len = l.prefix.find(head, 0).map_or(0, |m| e_(&m) - b_(&m));
         if pre_len > 0 && b + pre_len < e && special(b + pre_len, e).is_some() {
             pre.push((b, b + pre_len));
             b += pre_len;
             break;
         }
-        let suf_len = l.suffix.find(&full[b + pre_len..e], 0).map_or(0, |m| e_(&m) - b_(&m));
+        // Affixes are short and anchored, so each search looks only near its end of the span: scanning the whole span
+        // on every strip is quadratic in a long run of punctuation. Lookbehinds still see the text before the window.
+        let span = &full[b + pre_len..e];
+        let from = span.ceil_char_boundary(span.len().saturating_sub(AFFIX_WINDOW));
+        let suf_len = l.suffix.find(span, from).map_or(0, |m| e_(&m) - b_(&m));
         if suf_len > 0 && e - suf_len > b && special(b, e - suf_len).is_some() {
             suf.push((e - suf_len, e));
             e -= suf_len;

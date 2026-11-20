@@ -1,13 +1,13 @@
 [package]
 name = "hearandspeak"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/RobViren/hearandspeak"
 readme = "README.md"
 keywords = ["speech", "asr", "tts", "kokoro", "parakeet"]
 categories = ["multimedia::audio", "science"]
-exclude = ["tools/", "samples/"]
+exclude = ["tools/", "samples/", "fuzz/"]
 description = "CPU streaming speech recognition (Parakeet TDT) and text to speech (Kokoro), pure Rust, AVX2"
 
 [features]

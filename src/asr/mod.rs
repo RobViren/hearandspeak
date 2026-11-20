@@ -21,6 +21,9 @@ use std::time::Instant;
 
 pub const MODEL_FILE: &str = "parakeet-ultra/model.safetensors";
 pub const TOKENIZER_FILE: &str = "parakeet-ultra/tokenizer.json";
+/// Lowest input rate accepted. Lower ones carry no intelligible speech, and resampling one to 16 kHz would multiply
+/// the input's size by up to 16000.
+pub const MIN_RATE: u32 = 1000;
 
 pub struct Asr {
     model: Model,
@@ -42,10 +45,26 @@ impl Asr {
         Ok(Asr { tok: Tokenizer::load(tokenizer)?, model: Model::load(model, pool)? })
     }
 
-    /// Whole recording at any sample rate, mono in [-1, 1]. Segments exactly as parakeetogo does: a recording up to
+    /// Errs when `rate` is below MIN_RATE, where `transcribe` and `stream` silently produce nothing.
+    pub fn check_rate(rate: u32) -> io::Result<()> {
+        if rate < MIN_RATE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("sample rate {rate} Hz is below the minimum of {MIN_RATE} Hz"),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Whole recording at any sample rate from MIN_RATE, mono in [-1, 1]; lower rates give "", and non-finite samples
+    /// count as 0. Segments exactly as parakeetogo does: a recording up to
     /// 30 s is one segment, longer ones are cut at pauses into segments of at most 30 s.
     pub fn transcribe(&mut self, pcm: &[f32], rate: u32) -> String {
-        let pcm = crate::resample::resample(pcm, rate, SAMPLE_RATE as u32);
+        if rate < MIN_RATE {
+            return String::new();
+        }
+        let mut pcm = crate::resample::resample(pcm, rate, SAMPLE_RATE as u32);
+        sanitize(&mut pcm);
         if pcm.len() < MIN_SAMPLES {
             return String::new();
         }
@@ -55,15 +74,25 @@ impl Asr {
         parts.into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" ")
     }
 
-    /// Incremental transcription of audio pushed in chunks of any size, with default options.
+    /// Incremental transcription of audio pushed in chunks of any size, with default options. Below MIN_RATE the
+    /// stream ignores its audio.
     pub fn stream(&mut self, rate: u32) -> Stream<'_> {
         self.stream_with(rate, StreamOpts::default())
     }
 
+    /// Negative or NaN options take their defaults; all are capped at an hour.
     pub fn stream_with(&mut self, rate: u32, opts: StreamOpts) -> Stream<'_> {
+        let d = StreamOpts::default();
+        let pick = |v: f32, d: f32| if v >= 0.0 { v.min(3600.0) } else { d };
+        let opts = StreamOpts {
+            pause: pick(opts.pause, d.pause),
+            max_seconds: pick(opts.max_seconds, d.max_seconds),
+            check_every: pick(opts.check_every, d.check_every),
+        };
         Stream {
             asr: self,
-            resampler: (rate != SAMPLE_RATE as u32).then(|| Resampler::new(rate, SAMPLE_RATE as u32)),
+            resampler: (rate != SAMPLE_RATE as u32)
+                .then(|| Resampler::new(if rate < MIN_RATE { 0 } else { rate }, SAMPLE_RATE as u32)),
             opts,
             pcm: Vec::new(),
             origin: 0,
@@ -143,6 +172,13 @@ impl Stream<'_> {
     }
 }
 
+/// Non-finite samples become silence; finite ones are bounded so the log-mel power stays finite.
+fn sanitize(pcm: &mut [f32]) {
+    for v in pcm {
+        *v = if v.is_finite() { v.clamp(-1e6, 1e6) } else { 0.0 };
+    }
+}
+
 enum Cut {
     Final(usize),
     Drop(usize),
@@ -150,10 +186,12 @@ enum Cut {
 
 impl Stream<'_> {
     pub fn push(&mut self, chunk: &[f32]) -> Vec<Segment> {
+        let had = self.pcm.len();
         match &mut self.resampler {
             Some(r) => r.push(chunk, &mut self.pcm),
             None => self.pcm.extend_from_slice(chunk),
         }
+        sanitize(&mut self.pcm[had..]);
         let mut out = Vec::new();
         let step = (self.opts.check_every * SAMPLE_RATE as f32) as usize;
         if self.pcm.len() < self.checked + step.max(1) {
@@ -171,7 +209,9 @@ impl Stream<'_> {
 
     pub fn finish(mut self) -> Vec<Segment> {
         if let Some(r) = &mut self.resampler {
+            let had = self.pcm.len();
             r.finish(&mut self.pcm);
+            sanitize(&mut self.pcm[had..]);
         }
         if self.pcm.len() < MIN_SAMPLES {
             return Vec::new();

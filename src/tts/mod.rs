@@ -46,12 +46,16 @@ impl Voice {
     pub fn builtin_names() -> impl Iterator<Item = &'static str> {
         BUILTIN.iter().map(|(n, _)| *n)
     }
-    /// Raw little-endian f32 [510][1][256] (522240 bytes).
+    /// Raw little-endian f32 [510][1][256] (522240 bytes), all finite.
     pub fn from_bytes(b: &[u8]) -> io::Result<Voice> {
         if b.len() != 510 * 256 * 4 {
             return Err(crate::st::bad(format!("voice pack is {} bytes, expected {}", b.len(), 510 * 256 * 4)));
         }
-        Ok(Voice(b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()))
+        let v: Vec<f32> = b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+        if !v.iter().all(|x| x.is_finite()) {
+            return Err(crate::st::bad("voice pack holds non-finite values"));
+        }
+        Ok(Voice(v))
     }
     pub fn from_file(path: &Path) -> io::Result<Voice> {
         Voice::from_bytes(&std::fs::read(path)?)
@@ -110,15 +114,18 @@ impl Tts {
         g2p::normalize(&self.g2p, text)
     }
 
-    /// One chunk of Kokoro phonemes (at most 510) to 24 kHz mono audio.
+    /// One chunk of Kokoro phonemes to 24 kHz mono audio. Symbols outside Kokoro's vocabulary are skipped and only
+    /// the first 510 known ones are spoken; none gives empty audio. Speed is clamped to [0.25, 4], and a
+    /// non-positive or NaN speed means 1.
     pub fn synthesize(&self, phonemes: &str, voice: &Voice, speed: f32) -> Vec<f32> {
         let n = phonemes.chars().count();
-        if n == 0 {
+        let mut ids = vec![0];
+        ids.extend(phonemes.chars().filter_map(|c| self.vocab.get(&c).copied()).take(510));
+        if ids.len() == 1 {
             return Vec::new();
         }
-        let mut ids = vec![0];
-        ids.extend(phonemes.chars().filter_map(|c| self.vocab.get(&c).copied()));
         ids.push(0);
+        let speed = if speed > 0.0 { speed.clamp(0.25, 4.0) } else { 1.0 };
         let mut noise = Noise { initial_phase: Vec::new(), randn: Vec::new(), seed: 0 };
         model::synthesize(&self.model, &self.pool, &ids, voice.style(n), speed, &mut noise)
     }

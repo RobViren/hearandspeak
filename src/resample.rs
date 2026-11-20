@@ -5,7 +5,13 @@ use std::arch::x86_64::*;
 
 const PASS: f64 = 0.91;
 const ATTEN: f64 = 120.0;
+const MAX_TAPS: usize = 1 << 16;
+const MAX_TABLE: usize = 1 << 24;
 
+/// A zero rate, or upsampling by more than MAX_TABLE / taps (about 95000x), produces no output. A ratio whose exact
+/// table would pass MAX_TABLE floats (coprime rates such as 1264013 to 16000) uses the closest ratio that fits, which
+/// can make the output length off by about 1e-5 of itself, more for extreme upsampling. A ratio past MAX_TAPS gets a
+/// shorter filter.
 pub struct Resampler {
     l: usize,
     m: usize,
@@ -18,8 +24,30 @@ pub struct Resampler {
     inputs: u64,
 }
 
-fn gcd(a: usize, b: usize) -> usize {
+fn gcd(a: u64, b: u64) -> u64 {
     if b == 0 { a } else { gcd(b, a % b) }
+}
+
+/// to / from in lowest terms, else its last continued fraction convergent with numerator at most `lmax`, else 0 / 1.
+fn ratio(to: u64, from: u64, lmax: u64) -> (u64, u64) {
+    let g = gcd(to, from);
+    if to / g <= lmax {
+        return (to / g, from / g);
+    }
+    let (mut a, mut b) = (to, from);
+    let (mut p0, mut q0, mut p1, mut q1) = (0, 1, 1, 0);
+    let mut best = (0, 1);
+    while b != 0 {
+        let k = a / b;
+        let (p, q) = (k * p1 + p0, k * q1 + q0);
+        if p > lmax {
+            break;
+        }
+        best = (p, q);
+        (p0, q0, p1, q1) = (p1, q1, p, q);
+        (a, b) = (b, a % b);
+    }
+    best
 }
 
 fn bessel_i0(x: f64) -> f64 {
@@ -34,12 +62,24 @@ fn bessel_i0(x: f64) -> f64 {
 
 impl Resampler {
     pub fn new(from: u32, to: u32) -> Resampler {
-        let g = gcd(from as usize, to as usize);
-        let (l, m) = (to as usize / g, from as usize / g);
+        if from == 0 || to == 0 {
+            return Resampler {
+                l: 0,
+                m: 1,
+                taps: 16,
+                table: Vec::new(),
+                buf: Vec::new(),
+                origin: 0,
+                next: 0,
+                inputs: 0,
+            };
+        }
         let low = from.min(to) as f64 / 2.0;
         let width = (1.0 - PASS) * low / from as f64;
         let beta = 0.1102 * (ATTEN - 8.7);
-        let taps = (((ATTEN - 7.95) / (14.36 * width)).ceil() as usize + 1).next_multiple_of(16);
+        let taps = (((ATTEN - 7.95) / (14.36 * width)).ceil() as usize + 1).next_multiple_of(16).min(MAX_TAPS);
+        let (l, m) = ratio(to as u64, from as u64, (MAX_TABLE / taps) as u64);
+        let (l, m) = (l as usize, m as usize);
         let fc = (1.0 + PASS) / 2.0 * low / from as f64;
         let half = taps as f64 / 2.0;
         let mut table = vec![0f32; l * taps];
@@ -69,6 +109,10 @@ impl Resampler {
 
     fn produce(&mut self, out: &mut Vec<f32>, limit: u64) {
         let (l, m) = (self.l as u64, self.m as u64);
+        if l == 0 {
+            self.buf.clear();
+            return;
+        }
         loop {
             let pos = self.next * m;
             let (base, phase) = ((pos / l) as usize, (pos % l) as usize);
@@ -125,7 +169,7 @@ pub fn resample(input: &[f32], from: u32, to: u32) -> Vec<f32> {
         return input.to_vec();
     }
     let mut r = Resampler::new(from, to);
-    let mut out = Vec::with_capacity(input.len() * to as usize / from as usize + 1);
+    let mut out = Vec::new();
     r.push(input, &mut out);
     r.finish(&mut out);
     out

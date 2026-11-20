@@ -1,3 +1,4 @@
 target/
 .cotg_session.json
 samples/
+__pycache__/
